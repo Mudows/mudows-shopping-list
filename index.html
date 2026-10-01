@@ -1,0 +1,225 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Lista de Compras Mensal</title>
+  <!-- Bootstrap 5 CSS -->
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet">
+  <!-- Bootstrap Icons -->
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.min.css" rel="stylesheet">
+  <style>
+    body {
+      background-color: #f8f9fa;
+      min-height: 100vh;
+    }
+    /* Overlay de carregamento e bloqueio */
+    #loadingOverlay {
+      position: fixed;
+      inset: 0;
+      background: rgba(255, 255, 255, 0.85);
+      display: none;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      z-index: 9999;
+      backdrop-filter: blur(3px);
+    }
+    .view-section {
+      display: none;
+    }
+    .view-section.active {
+      display: block;
+    }
+    .shopping-item-card {
+      cursor: pointer;
+      user-select: none;
+      transition: transform 0.1s ease, box-shadow 0.1s ease, opacity 0.2s ease;
+    }
+    .shopping-item-card:hover {
+      box-shadow: 0 0.25rem 0.5rem rgba(0,0,0,0.08);
+    }
+    .shopping-item-card.checked {
+      opacity: 0.55;
+      text-decoration: line-through;
+    }
+    .filter-badge {
+      cursor: pointer;
+      user-select: none;
+      transition: all 0.15s ease;
+    }
+    /* Autocomplete Customizado */
+    .autocomplete-wrapper {
+      position: relative;
+    }
+    .autocomplete-dropdown {
+      position: absolute;
+      top: 100%;
+      left: 0;
+      right: 0;
+      background: #ffffff;
+      border: 1px solid #dee2e6;
+      border-radius: 0.375rem;
+      box-shadow: 0 0.5rem 1rem rgba(0, 0, 0, 0.15);
+      max-height: 230px;
+      overflow-y: auto;
+      z-index: 1050;
+      margin-top: 4px;
+      display: none;
+    }
+    .autocomplete-item {
+      padding: 0.6rem 0.75rem;
+      cursor: pointer;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      border-bottom: 1px solid #f1f5f9;
+      transition: background-color 0.1s ease;
+    }
+    .autocomplete-item:last-child {
+      border-bottom: none;
+    }
+    .autocomplete-item:hover, .autocomplete-item.active {
+      background-color: #f1f5f9;
+    }
+  </style>
+</head>
+<body class="py-4">
+
+  <!-- Overlay de bloqueio com spinner -->
+  <div id="loadingOverlay">
+    <div class="spinner-border text-primary" style="width: 3rem; height: 3rem;" role="status">
+      <span class="visually-hidden">Carregando...</span>
+    </div>
+    <div class="mt-3 fw-bold text-secondary" id="loadingText">Sincronizando dados com a planilha...</div>
+  </div>
+
+  <div class="container" style="max-width: 720px;">
+    <!-- Cabeçalho -->
+    <header class="d-flex justify-content-between align-items-center mb-4 pb-2 border-bottom">
+      <h1 class="h3 fw-bold mb-0 text-dark" id="pageTitle">Minhas Listas</h1>
+      <div id="headerActions"></div>
+    </header>
+
+    <!-- TELA 1: LISTAGEM DE HISTÓRICO -->
+    <section id="viewHome" class="view-section active">
+      <div class="d-flex gap-2 mb-4">
+        <button class="btn btn-primary flex-grow-1 d-flex align-items-center justify-content-center gap-2" onclick="startNewList()">
+          <i class="bi bi-plus-circle-fill"></i> Nova Lista
+        </button>
+        <button class="btn btn-outline-secondary d-flex align-items-center gap-2" onclick="openCategoriesView()">
+          <i class="bi bi-gear-fill"></i> Categorias
+        </button>
+      </div>
+
+      <div id="listsContainer"></div>
+    </section>
+
+    <!-- TELA 2: EDIÇÃO / CRIAÇÃO DE LISTA -->
+    <section id="viewEditor" class="view-section">
+      <div class="card shadow-sm border-0 mb-3">
+        <div class="card-body">
+          <div>
+            <label class="form-label small fw-semibold text-muted">Quando será realizada a compra?</label>
+            <input type="date" id="listDate" class="form-control" onchange="updateTitleFromDate(this.value)">
+            <div class="form-text small text-secondary">
+              Título da lista: <strong id="generatedTitlePreview" class="text-dark">AAAA-MM-DD</strong>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="card shadow-sm border-0 mb-3">
+        <div class="card-body">
+          <h6 class="card-subtitle mb-3 text-muted fw-bold">Adicionar Item</h6>
+          <div class="row g-2 mb-2">
+            <div class="col-8 autocomplete-wrapper">
+              <input type="text" id="itemName" class="form-control" placeholder="Digite para buscar ou adicionar item..." autocomplete="off" oninput="onItemInput(this.value)" onfocus="onItemInput(this.value)" onkeydown="handleAutocompleteKeydown(event)">
+              <div id="autocompleteDropdown" class="autocomplete-dropdown"></div>
+            </div>
+            <div class="col-4">
+              <input type="number" id="itemQty" class="form-control" value="1" min="1" placeholder="Qtd">
+            </div>
+          </div>
+
+          <div class="mb-2">
+            <select id="itemCategory" class="form-select" onchange="checkCategorySelect(this.value)">
+              <!-- Preenchido dinamicamente via JS -->
+            </select>
+          </div>
+
+          <!-- Caixa Inline para Criar Categoria rápida -->
+          <div id="inlineCatBox" class="p-3 bg-light rounded border mb-3" style="display: none;">
+            <label class="form-label small fw-semibold">Criar nova categoria/ala</label>
+            <div class="d-flex gap-2 align-items-center">
+              <input type="text" id="inlineCatName" class="form-control form-control-sm" placeholder="Nome da ala">
+              <input type="color" id="inlineCatColor" class="form-control form-control-color form-control-sm" value="#bae6fd" title="Escolha a cor">
+              <button type="button" class="btn btn-sm btn-primary" onclick="confirmInlineCategory()">Criar e Salvar</button>
+            </div>
+          </div>
+
+          <button class="btn btn-outline-primary w-100 d-flex align-items-center justify-content-center gap-2" onclick="addItemToList()">
+            <i class="bi bi-cart-plus"></i> Incluir Item
+          </button>
+        </div>
+      </div>
+
+      <!-- Lista de Itens Adicionados -->
+      <div id="editorItemsContainer" class="mb-4"></div>
+
+      <div class="d-flex gap-2">
+        <button class="btn btn-outline-secondary flex-grow-1" onclick="goHome()">Cancelar / Voltar</button>
+        <button class="btn btn-success flex-grow-2 px-4 d-flex align-items-center justify-content-center gap-2" onclick="saveAndEnterShoppingMode()">
+          <i class="bi bi-cart-check-fill"></i> Salvar e Ir às Compras
+        </button>
+      </div>
+    </section>
+
+    <!-- TELA 3: MODO DE COMPRAS -->
+    <section id="viewShopping" class="view-section">
+      <div class="d-flex justify-content-between align-items-center mb-3">
+        <button class="btn btn-outline-secondary btn-sm d-flex align-items-center gap-1" onclick="exitShoppingMode()">
+          <i class="bi bi-arrow-left"></i> Sair e Continuar Depois
+        </button>
+        <button class="btn btn-success btn-sm d-flex align-items-center gap-1" onclick="finishShopping()">
+          <i class="bi bi-check2-circle"></i> Encerrar e Concluir
+        </button>
+      </div>
+
+      <!-- Filtros por Categoria -->
+      <div class="d-flex gap-2 overflow-auto pb-2 mb-3" id="shoppingFiltersContainer"></div>
+
+      <!-- Itens do Carrinho -->
+      <div id="shoppingItemsContainer"></div>
+    </section>
+
+    <!-- TELA 4: GERENCIAR CATEGORIAS -->
+    <section id="viewCategories" class="view-section">
+      <div class="card shadow-sm border-0 mb-3">
+        <div class="card-body">
+          <h6 class="card-subtitle mb-3 text-muted fw-bold">Nova Categoria</h6>
+          <div class="d-flex gap-2 align-items-center">
+            <input type="text" id="manageCatName" class="form-control" placeholder="Nome da categoria (ex: Hortifrúti, Carnes)">
+            <input type="color" id="manageCatColor" class="form-control form-control-color" value="#cbd5e1" title="Cor da categoria">
+            <button class="btn btn-primary text-nowrap" onclick="createCategoryFromManager()">Adicionar</button>
+          </div>
+        </div>
+      </div>
+
+      <div class="card shadow-sm border-0 mb-3">
+        <div class="card-body">
+          <h6 class="card-subtitle mb-3 text-muted fw-bold">Categorias Cadastradas</h6>
+          <div id="categoriesListContainer"></div>
+        </div>
+      </div>
+
+      <button class="btn btn-outline-secondary w-100" onclick="goHome()">Voltar para Listas</button>
+    </section>
+  </div>
+
+  <!-- Bootstrap 5 Bundle JS -->
+  <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
+  <!-- Arquivo de Lógica -->
+  <script src="app.js"></script>
+</body>
+</html>
