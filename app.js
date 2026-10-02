@@ -4,6 +4,7 @@ const SCRIPT_URL = "https://script.google.com/macros/s/AKfycbzYkjZLw--OJpp_vS_f_
 // Chaves do LocalStorage
 const STORAGE_TOKEN_KEY = "compras_session_token";
 const STORAGE_USER_KEY = "compras_session_user";
+const STORAGE_DRAFT_KEY = "compras_active_editor_draft";
 
 // Categorias padrão
 const DEFAULT_CATEGORIES = [
@@ -28,21 +29,52 @@ let state = {
 };
 
 let currentFocusIndex = -1;
+let deferredPrompt = null;
 
-// Requisições seguras compatíveis com origin local (file:// e http://localhost)
+// PWA Service Worker
+if ('serviceWorker' in navigator) {
+  window.addEventListener('load', () => {
+    navigator.serviceWorker.register('./sw.js').catch(err => {
+      console.log('ServiceWorker registration failed: ', err);
+    });
+  });
+}
+
+// Banner PWA
+window.addEventListener('beforeinstallprompt', (e) => {
+  e.preventDefault();
+  deferredPrompt = e;
+  const banner = document.getElementById('installBanner');
+  if (banner) {
+    banner.classList.remove('d-none');
+    banner.classList.add('d-flex');
+  }
+});
+
+function installApp() {
+  if (deferredPrompt) {
+    deferredPrompt.prompt();
+    deferredPrompt.userChoice.then(() => {
+      deferredPrompt = null;
+      dismissInstallBanner();
+    });
+  }
+}
+
+function dismissInstallBanner() {
+  const banner = document.getElementById('installBanner');
+  if (banner) {
+    banner.classList.add('d-none');
+    banner.classList.remove('d-flex');
+  }
+}
+
+// Requisições seguras compatíveis com origin local
 async function apiCall(action, payload = {}) {
   const overlay = document.getElementById('loadingOverlay');
   overlay.style.display = 'flex';
 
   try {
-    const body = {
-      action: action,
-      token: state.token,
-      ...payload
-    };
-
-    // Usando URLSearchParams (application/x-www-form-urlencoded simples)
-    // Isso é uma requisição CORS simples que não dispara preflight OPTIONS e segue redirects 302 sem travar
     const formBody = new URLSearchParams();
     formBody.append("action", action);
     if (state.token) formBody.append("token", state.token);
@@ -77,6 +109,70 @@ async function apiCall(action, payload = {}) {
     overlay.style.display = 'none';
   }
 }
+
+// ==========================================
+// AUTO-SAVE E PERSISTÊNCIA DE RASCUNHO (DRAFT)
+// ==========================================
+function saveDraftToStorage() {
+  if (state.currentList && (state.currentList.items.length > 0 || state.currentList.date)) {
+    localStorage.setItem(STORAGE_DRAFT_KEY, JSON.stringify(state.currentList));
+  }
+}
+
+function clearDraftStorage() {
+  localStorage.removeItem(STORAGE_DRAFT_KEY);
+  checkDraftAlert();
+}
+
+function checkDraftAlert() {
+  const draftStr = localStorage.getItem(STORAGE_DRAFT_KEY);
+  const alertEl = document.getElementById('draftAlert');
+  if (draftStr && (!state.currentList || document.getElementById('viewHome').classList.contains('active'))) {
+    try {
+      const draft = JSON.parse(draftStr);
+      if (draft && draft.items && (draft.items.length > 0 || draft.date)) {
+        document.getElementById('draftAlertDesc').innerText = `Lista de ${draft.date || 'data não informada'} com ${draft.items.length} itens.`;
+        alertEl.classList.remove('d-none');
+        alertEl.classList.add('d-flex');
+        return;
+      }
+    } catch(e) {}
+  }
+  if (alertEl) {
+    alertEl.classList.add('d-none');
+    alertEl.classList.remove('d-flex');
+  }
+}
+
+function resumeDraft() {
+  const draftStr = localStorage.getItem(STORAGE_DRAFT_KEY);
+  if (!draftStr) return;
+  try {
+    state.currentList = JSON.parse(draftStr);
+    openEditor();
+  } catch(e) {}
+}
+
+function discardDraft() {
+  clearDraftStorage();
+}
+
+function leaveEditorSafely() {
+  saveDraftToStorage();
+  renderHome();
+}
+
+// Salva rascunho automaticamente se a janela/aba for fechada ou ocultada
+window.addEventListener('beforeunload', () => {
+  if (document.getElementById('viewEditor').classList.contains('active')) {
+    saveDraftToStorage();
+  }
+});
+document.addEventListener('visibilitychange', () => {
+  if (document.visibilityState === 'hidden' && document.getElementById('viewEditor').classList.contains('active')) {
+    saveDraftToStorage();
+  }
+});
 
 // ==========================================
 // AUTENTICAÇÃO E CONTAS
@@ -181,6 +277,7 @@ function getTodayIsoDate() {
 function renderHome() {
   switchView('viewHome');
   document.getElementById('pageTitle').innerText = "Minhas Listas";
+  checkDraftAlert();
   const container = document.getElementById('listsContainer');
   container.innerHTML = "";
 
@@ -218,23 +315,42 @@ function renderHome() {
           </span>
         </div>
 
-        <div class="d-flex gap-2 mt-3 pt-2 border-top">
-          <button class="btn btn-sm btn-outline-secondary d-flex align-items-center gap-1" onclick="cloneList('${l.id}')">
-            <i class="bi bi-copy"></i> Copiar Base
-          </button>
-          ${!isCompleted ? `
-            <button class="btn btn-sm btn-primary d-flex align-items-center gap-1" onclick="resumeShopping('${l.id}')">
-              <i class="bi bi-cart3"></i> Ir às Compras
+        <div class="d-flex justify-content-between align-items-center mt-3 pt-2 border-top">
+          <div class="d-flex gap-2">
+            <button class="btn btn-sm btn-outline-secondary d-flex align-items-center gap-1" onclick="cloneList('${l.id}')">
+              <i class="bi bi-copy"></i> Copiar Base
             </button>
-          ` : ''}
-          <button class="btn btn-sm btn-outline-primary d-flex align-items-center gap-1" onclick="editList('${l.id}')">
-            <i class="bi bi-pencil"></i> Editar
+            ${!isCompleted ? `
+              <button class="btn btn-sm btn-primary d-flex align-items-center gap-1" onclick="resumeShopping('${l.id}')">
+                <i class="bi bi-cart3"></i> Ir às Compras
+              </button>
+            ` : ''}
+            <button class="btn btn-sm btn-outline-primary d-flex align-items-center gap-1" onclick="editList('${l.id}')">
+              <i class="bi bi-pencil"></i> Editar
+            </button>
+          </div>
+          <button class="btn btn-sm btn-outline-danger d-flex align-items-center gap-1" title="Excluir Lista" onclick="deleteList('${l.id}', '${escapeHtml(displayTitle)}')">
+            <i class="bi bi-trash3"></i>
           </button>
         </div>
       </div>
     `;
     container.appendChild(card);
   });
+}
+
+async function deleteList(listId, displayTitle) {
+  if (!confirm(`Tem certeza de que deseja excluir permanentemente a lista "${displayTitle}"?`)) return;
+
+  const res = await apiCall("deleteList", { listId: listId });
+  if (res && res.lists) {
+    state.lists = res.lists;
+    state.catalog = res.catalog || state.catalog;
+    if (res.categories && res.categories.length) state.categories = res.categories;
+  } else {
+    state.lists = state.lists.filter(l => l.id !== listId);
+  }
+  renderHome();
 }
 
 // ========================================================
@@ -251,6 +367,7 @@ async function startNewList() {
     status: "comprando",
     items: []
   };
+  saveDraftToStorage();
   openEditor();
 }
 
@@ -271,6 +388,7 @@ async function cloneList(sourceId) {
       checked: false
     }))
   };
+  saveDraftToStorage();
   openEditor();
 }
 
@@ -280,6 +398,7 @@ async function editList(listId) {
   const src = state.lists.find(x => x.id === listId);
   if (!src) return;
   state.currentList = JSON.parse(JSON.stringify(src));
+  saveDraftToStorage();
   openEditor();
 }
 
@@ -289,6 +408,7 @@ function updateTitleFromDate(dateValue) {
   state.currentList.name = finalDate;
   document.getElementById('generatedTitlePreview').innerText = finalDate;
   document.getElementById('pageTitle').innerText = finalDate;
+  saveDraftToStorage();
 }
 
 function openEditor() {
@@ -337,6 +457,7 @@ async function confirmInlineCategory() {
   document.getElementById('itemCategory').value = name;
   document.getElementById('inlineCatBox').style.display = "none";
   document.getElementById('inlineCatName').value = "";
+  saveDraftToStorage();
 }
 
 // ==========================================
@@ -477,11 +598,13 @@ function addItemToList() {
   document.getElementById('itemQty').value = "1";
   hideAutocomplete();
   renderEditorItems();
+  saveDraftToStorage();
 }
 
 function removeItemFromList(idx) {
   state.currentList.items.splice(idx, 1);
   renderEditorItems();
+  saveDraftToStorage();
 }
 
 function renderEditorItems() {
@@ -538,6 +661,8 @@ async function saveAndEnterShoppingMode() {
     else state.lists.push(state.currentList);
   }
 
+  // Lista salva com sucesso: descarta o rascunho pendente
+  clearDraftStorage();
   openShoppingMode(state.currentList);
 }
 
@@ -708,5 +833,4 @@ function goHome() {
   renderHome();
 }
 
-// Iniciar aplicação
 window.onload = init;
