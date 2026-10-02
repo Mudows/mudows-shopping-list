@@ -1,7 +1,11 @@
 // URL do Google Apps Script
 const SCRIPT_URL = "https://script.google.com/macros/s/AKfycbzYkjZLw--OJpp_vS_f_c9KWVWdyAWyJJ9XFjsEHfAoLHD_OsgVmLphbxC6KvVqjR8OOA/exec";
 
-// Categorias padrão caso a planilha esteja completamente vazia
+// Chaves do LocalStorage
+const STORAGE_TOKEN_KEY = "compras_session_token";
+const STORAGE_USER_KEY = "compras_session_user";
+
+// Categorias padrão de contingência
 const DEFAULT_CATEGORIES = [
   { id: "cat_1", name: "Hortifrúti", color: "#dcfce7" },
   { id: "cat_2", name: "Padaria", color: "#fef3c7" },
@@ -11,8 +15,11 @@ const DEFAULT_CATEGORIES = [
   { id: "cat_6", name: "Geral", color: "#f1f5f9" }
 ];
 
-// Estado da Aplicação (Memória em Cache)
+// Estado da Aplicação
 let state = {
+  authMode: "login", // "login" ou "register"
+  token: localStorage.getItem(STORAGE_TOKEN_KEY) || null,
+  currentUser: JSON.parse(localStorage.getItem(STORAGE_USER_KEY) || "null"),
   lists: [],
   catalog: [],
   categories: [...DEFAULT_CATEGORIES],
@@ -22,56 +29,125 @@ let state = {
 
 let currentFocusIndex = -1;
 
-// Requisições com bloqueio de interface
-async function apiCall(method, body = null) {
+// Requisições seguras com inclusão do Token de sessão
+async function apiCall(action, payload = {}) {
   const overlay = document.getElementById('loadingOverlay');
   overlay.style.display = 'flex';
 
   try {
-    const opts = {
-      method: method,
-      redirect: 'follow'
+    const body = {
+      action: action,
+      token: state.token,
+      ...payload
     };
 
-    if (body) {
-      // Envio em text/plain para contornar pre-flight CORS no Apps Script
-      opts.headers = { 'Content-Type': 'text/plain;charset=utf-8' };
-      opts.body = JSON.stringify(body);
+    const res = await fetch(SCRIPT_URL, {
+      method: "POST",
+      headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+      body: JSON.stringify(body),
+      redirect: 'follow'
+    });
+
+    const data = await res.json();
+
+    if (data && data.error && data.error.includes("não autorizado")) {
+      logout();
+      alert("Sessão expirada. Por favor faça login novamente.");
+      return null;
     }
 
-    const res = await fetch(SCRIPT_URL, opts);
-    const data = await res.json();
     return data;
   } catch (err) {
     console.error("Erro na requisição:", err);
-    alert("Houve uma falha na conexão com a planilha Google. Os dados continuam disponíveis localmente.");
+    alert("Falha na conexão com a planilha Google. Verifique sua conexão.");
     return null;
   } finally {
     overlay.style.display = 'none';
   }
 }
 
-// Sincroniza dados com o backend
-async function syncDataFromBackend() {
-  const data = await apiCall("GET");
-  if (data) {
-    state.lists = data.lists || [];
-    state.catalog = data.catalog || [];
+// ==========================================
+// AUTENTICAÇÃO E CONTAS
+// ==========================================
+function toggleAuthMode() {
+  state.authMode = state.authMode === "login" ? "register" : "login";
+  const isReg = state.authMode === "register";
 
-    // Se o backend tiver categorias cadastradas, atualiza a lista oficial
-    if (data.categories && data.categories.length > 0) {
-      state.categories = data.categories;
+  document.getElementById('authTitle').innerText = isReg ? "Criar Nova Conta" : "Acessar Lista de Compras";
+  document.getElementById('authSubtitle').innerText = isReg ? "Crie sua conta para manter suas listas salvas com segurança." : "Entre com suas credenciais para visualizar e alterar os dados.";
+  document.getElementById('authSubmitBtn').innerText = isReg ? "Cadastrar" : "Entrar";
+  document.getElementById('nameFieldGroup').style.display = isReg ? "block" : "none";
+  document.getElementById('toggleAuthModeBtn').innerText = isReg ? "Já tem conta? Fazer login" : "Não tem conta? Criar nova conta";
+}
+
+async function handleAuthSubmit(e) {
+  e.preventDefault();
+  const email = document.getElementById('authEmail').value.trim();
+  const password = document.getElementById('authPassword').value;
+  const name = document.getElementById('authName').value.trim();
+
+  if (state.authMode === "login") {
+    const res = await apiCall("login", { email, password });
+    if (res && res.ok) {
+      setSession(res.token, res.user);
+      await enterApp();
     } else {
-      // Se a aba estiver vazia no primeiro uso, salva as categorias padrão na planilha
-      await apiCall("POST", { action: "saveCategories", categories: state.categories });
+      alert((res && res.error) || "Falha no login. Verifique seus dados.");
+    }
+  } else {
+    const res = await apiCall("register", { email, password, name });
+    if (res && res.ok) {
+      alert("Conta criada com sucesso!");
+      setSession(res.token, res.user);
+      await enterApp();
+    } else {
+      alert((res && res.error) || "Falha ao criar conta.");
     }
   }
 }
 
-// Inicialização: executada ao abrir a aplicação
-async function init() {
+function setSession(token, user) {
+  state.token = token;
+  state.currentUser = user;
+  localStorage.setItem(STORAGE_TOKEN_KEY, token);
+  localStorage.setItem(STORAGE_USER_KEY, JSON.stringify(user));
+}
+
+function logout() {
+  state.token = null;
+  state.currentUser = null;
+  localStorage.removeItem(STORAGE_TOKEN_KEY);
+  localStorage.removeItem(STORAGE_USER_KEY);
+  document.getElementById('mainAppArea').style.display = 'none';
+  switchView('viewAuth');
+}
+
+async function enterApp() {
+  document.getElementById('mainAppArea').style.display = 'block';
+  document.getElementById('userBadge').innerText = `Logado como: ${state.currentUser ? (state.currentUser.name || state.currentUser.email) : ''}`;
   await syncDataFromBackend();
   renderHome();
+}
+
+async function syncDataFromBackend() {
+  if (!state.token) return;
+  const data = await apiCall("getData");
+  if (data && data.ok) {
+    state.lists = data.lists || [];
+    state.catalog = data.catalog || [];
+    if (data.categories && data.categories.length > 0) {
+      state.categories = data.categories;
+    }
+  }
+}
+
+// Inicialização da Aplicação
+async function init() {
+  if (state.token && state.currentUser) {
+    await enterApp();
+  } else {
+    switchView('viewAuth');
+  }
 }
 
 function switchView(viewId) {
@@ -106,12 +182,8 @@ function renderHome() {
     return;
   }
 
-  // Ordenação do mais recente para o mais antigo (AAAA-MM-DD)
-  const sorted = [...state.lists].sort((a, b) => {
-    const dateA = a.date || "";
-    const dateB = b.date || "";
-    return dateB.localeCompare(dateA);
-  });
+  // Ordenação: mais novo para mais antigo (AAAA-MM-DD)
+  const sorted = [...state.lists].sort((a, b) => (b.date || "").localeCompare(a.date || ""));
 
   sorted.forEach(l => {
     const isCompleted = l.status === "concluida";
@@ -156,10 +228,9 @@ function renderHome() {
 }
 
 // ========================================================
-// TELA 2: EDIÇÃO DE LISTA & SINCRONIZAÇÃO DE CATEGORIAS
+// TELA 2: EDIÇÃO DE LISTA & CATEGORIAS
 // ========================================================
 async function startNewList() {
-  // Atualiza as categorias e catálogo do banco antes de abrir o formulário
   await syncDataFromBackend();
 
   const defaultDate = getTodayIsoDate();
@@ -234,7 +305,6 @@ function checkCategorySelect(val) {
   }
 }
 
-// Criação inline com persistência imediata na planilha
 async function confirmInlineCategory() {
   const name = document.getElementById('inlineCatName').value.trim();
   const color = document.getElementById('inlineCatColor').value;
@@ -251,8 +321,7 @@ async function confirmInlineCategory() {
   const newCat = { id: "cat_" + Date.now(), name, color };
   state.categories.push(newCat);
 
-  // Persiste imediatamente na planilha para garantir que apareça em "Categorias Cadastradas"
-  await apiCall("POST", { action: "saveCategories", categories: state.categories });
+  await apiCall("saveCategories", { categories: state.categories });
 
   renderCategorySelect();
   document.getElementById('itemCategory').value = name;
@@ -261,7 +330,7 @@ async function confirmInlineCategory() {
 }
 
 // ==========================================
-// AUTOCOMPLETE CLIENT-SIDE (Sem requisições adicionais)
+// AUTOCOMPLETE CLIENT-SIDE
 // ==========================================
 function onItemInput(val) {
   const dropdown = document.getElementById('autocompleteDropdown');
@@ -446,7 +515,7 @@ async function saveAndEnterShoppingMode() {
   const isExisting = state.lists.some(l => l.id === state.currentList.id);
   const action = isExisting ? "updateList" : "saveList";
 
-  const res = await apiCall("POST", { action, list: state.currentList });
+  const res = await apiCall(action, { list: state.currentList });
   if (res && res.lists) {
     state.lists = res.lists;
     state.catalog = res.catalog;
@@ -555,7 +624,7 @@ function toggleShoppingItem(id) {
 }
 
 async function exitShoppingMode() {
-  await apiCall("POST", { action: "updateList", list: state.currentList });
+  await apiCall("updateList", { list: state.currentList });
   renderHome();
 }
 
@@ -563,15 +632,14 @@ async function finishShopping() {
   if (!confirm("Deseja marcar esta lista como compra concluída?")) return;
   state.currentList.status = "concluida";
   state.currentList.completedAt = new Date().toISOString();
-  await apiCall("POST", { action: "updateList", list: state.currentList });
+  await apiCall("updateList", { list: state.currentList });
   renderHome();
 }
 
 // ========================================================
-// TELA 4: GERENCIAR CATEGORIAS (Com atualização garantida)
+// TELA 4: GERENCIAR CATEGORIAS
 // ========================================================
 async function openCategoriesView() {
-  // Sincroniza do banco antes de listar
   await syncDataFromBackend();
   switchView('viewCategories');
   document.getElementById('pageTitle').innerText = "Configurar Categorias";
@@ -610,20 +678,20 @@ async function createCategoryFromManager() {
   state.categories.push({ id: "cat_" + Date.now(), name, color });
   document.getElementById('manageCatName').value = "";
   renderCategoriesList();
-  await apiCall("POST", { action: "saveCategories", categories: state.categories });
+  await apiCall("saveCategories", { categories: state.categories });
 }
 
 async function updateCatColor(idx, color) {
   state.categories[idx].color = color;
   renderCategoriesList();
-  await apiCall("POST", { action: "saveCategories", categories: state.categories });
+  await apiCall("saveCategories", { categories: state.categories });
 }
 
 async function deleteCategory(idx) {
   if (!confirm("Deseja excluir esta categoria?")) return;
   state.categories.splice(idx, 1);
   renderCategoriesList();
-  await apiCall("POST", { action: "saveCategories", categories: state.categories });
+  await apiCall("saveCategories", { categories: state.categories });
 }
 
 function goHome() {
