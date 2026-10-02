@@ -5,7 +5,7 @@ const SCRIPT_URL = "https://script.google.com/macros/s/AKfycbzYkjZLw--OJpp_vS_f_
 const STORAGE_TOKEN_KEY = "compras_session_token";
 const STORAGE_USER_KEY = "compras_session_user";
 
-// Categorias padrão de contingência
+// Categorias padrão
 const DEFAULT_CATEGORIES = [
   { id: "cat_1", name: "Hortifrúti", color: "#dcfce7" },
   { id: "cat_2", name: "Padaria", color: "#fef3c7" },
@@ -17,7 +17,7 @@ const DEFAULT_CATEGORIES = [
 
 // Estado da Aplicação
 let state = {
-  authMode: "login", // "login" ou "register"
+  authMode: "login",
   token: localStorage.getItem(STORAGE_TOKEN_KEY) || null,
   currentUser: JSON.parse(localStorage.getItem(STORAGE_USER_KEY) || "null"),
   lists: [],
@@ -29,7 +29,7 @@ let state = {
 
 let currentFocusIndex = -1;
 
-// Requisições seguras com inclusão do Token de sessão
+// Requisições seguras compatíveis com origin local (file:// e http://localhost)
 async function apiCall(action, payload = {}) {
   const overlay = document.getElementById('loadingOverlay');
   overlay.style.display = 'flex';
@@ -41,10 +41,22 @@ async function apiCall(action, payload = {}) {
       ...payload
     };
 
+    // Usando URLSearchParams (application/x-www-form-urlencoded simples)
+    // Isso é uma requisição CORS simples que não dispara preflight OPTIONS e segue redirects 302 sem travar
+    const formBody = new URLSearchParams();
+    formBody.append("action", action);
+    if (state.token) formBody.append("token", state.token);
+    for (const key in payload) {
+      if (typeof payload[key] === "object") {
+        formBody.append(key, JSON.stringify(payload[key]));
+      } else {
+        formBody.append(key, payload[key]);
+      }
+    }
+
     const res = await fetch(SCRIPT_URL, {
       method: "POST",
-      headers: { 'Content-Type': 'text/plain;charset=utf-8' },
-      body: JSON.stringify(body),
+      body: formBody,
       redirect: 'follow'
     });
 
@@ -52,14 +64,14 @@ async function apiCall(action, payload = {}) {
 
     if (data && data.error && data.error.includes("não autorizado")) {
       logout();
-      alert("Sessão expirada. Por favor faça login novamente.");
+      alert("Sessão expirada ou não autorizada. Faça login novamente.");
       return null;
     }
 
     return data;
   } catch (err) {
     console.error("Erro na requisição:", err);
-    alert("Falha na conexão com a planilha Google. Verifique sua conexão.");
+    alert("Falha de conexão com o Google Apps Script.\nCertifique-se de que a nova versão do código foi implantada no Apps Script com acesso para 'Qualquer pessoa'.");
     return null;
   } finally {
     overlay.style.display = 'none';
@@ -92,7 +104,7 @@ async function handleAuthSubmit(e) {
       setSession(res.token, res.user);
       await enterApp();
     } else {
-      alert((res && res.error) || "Falha no login. Verifique seus dados.");
+      alert((res && res.error) || "Falha no login. Verifique se publicou a nova versão no Apps Script.");
     }
   } else {
     const res = await apiCall("register", { email, password, name });
@@ -141,7 +153,6 @@ async function syncDataFromBackend() {
   }
 }
 
-// Inicialização da Aplicação
 async function init() {
   if (state.token && state.currentUser) {
     await enterApp();
@@ -165,7 +176,7 @@ function getTodayIsoDate() {
 }
 
 // ===============================================
-// TELA 1: HOME & HISTÓRICO (Mais novo para mais antigo)
+// TELA 1: HOME & HISTÓRICO
 // ===============================================
 function renderHome() {
   switchView('viewHome');
@@ -182,7 +193,6 @@ function renderHome() {
     return;
   }
 
-  // Ordenação: mais novo para mais antigo (AAAA-MM-DD)
   const sorted = [...state.lists].sort((a, b) => (b.date || "").localeCompare(a.date || ""));
 
   sorted.forEach(l => {
@@ -228,7 +238,7 @@ function renderHome() {
 }
 
 // ========================================================
-// TELA 2: EDIÇÃO DE LISTA & CATEGORIAS
+// TELA 2: EDIÇÃO DE LISTA
 // ========================================================
 async function startNewList() {
   await syncDataFromBackend();
