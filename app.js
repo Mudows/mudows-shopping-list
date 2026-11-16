@@ -268,7 +268,11 @@ function getCategoryColor(name) {
 }
 
 function getTodayIsoDate() {
-  return new Date().toISOString().split('T')[0];
+  const now = new Date();
+  const year = now.getFullYear();
+  const month = String(now.getMonth() + 1).padStart(2, '0');
+  const day = String(now.getDate()).padStart(2, '0');
+  return `${year}-${month}-${day}`;
 }
 
 // ===============================================
@@ -485,9 +489,10 @@ function onItemInput(val) {
   }
 
   let html = '';
+  const escapedTerm = term.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const regex = new RegExp(`(${escapedTerm})`, 'gi');
   matches.forEach(item => {
     const catColor = getCategoryColor(item.category);
-    const regex = new RegExp(`(${term})`, 'gi');
     const highlightedName = item.name.replace(regex, '<strong>$1</strong>');
 
     html += `
@@ -570,7 +575,12 @@ document.addEventListener('click', function (e) {
 });
 
 function escapeHtml(text) {
-  return (text || '').replace(/'/g, "\'");
+  return String(text || '')
+    .replace(/\\/g, "\\\\")
+    .replace(/'/g, "\\'")
+    .replace(/"/g, "&quot;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;");
 }
 
 function addItemToList() {
@@ -601,8 +611,8 @@ function addItemToList() {
   saveDraftToStorage();
 }
 
-function removeItemFromList(idx) {
-  state.currentList.items.splice(idx, 1);
+function removeItemFromList(itemId) {
+  state.currentList.items = state.currentList.items.filter(item => item.id !== itemId);
   renderEditorItems();
   saveDraftToStorage();
 }
@@ -618,7 +628,7 @@ function renderEditorItems() {
 
   const items = [...state.currentList.items].sort((a, b) => a.category.localeCompare(b.category));
 
-  items.forEach((item, idx) => {
+  items.forEach((item) => {
     const card = document.createElement('div');
     card.className = "card border-0 mb-2 shadow-sm";
     card.style.backgroundColor = getCategoryColor(item.category);
@@ -630,7 +640,7 @@ function renderEditorItems() {
         </div>
         <div class="d-flex align-items-center gap-3">
           <span class="fw-bold text-dark">x${item.quantity}</span>
-          <button class="btn btn-sm btn-link text-danger p-0" onclick="removeItemFromList(${idx})">
+          <button class="btn btn-sm btn-link text-danger p-0" onclick="removeItemFromList('${escapeHtml(item.id)}')">
             <i class="bi bi-trash3"></i>
           </button>
         </div>
