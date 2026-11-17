@@ -6,15 +6,55 @@ const STORAGE_TOKEN_KEY = "compras_session_token";
 const STORAGE_USER_KEY = "compras_session_user";
 const STORAGE_DRAFT_KEY = "compras_active_editor_draft";
 
-// Categorias padrão
+// Categorias padrão do sistema (compartilhadas e imutáveis)
 const DEFAULT_CATEGORIES = [
-  { id: "cat_1", name: "Hortifrúti", color: "#dcfce7" },
-  { id: "cat_2", name: "Padaria", color: "#fef3c7" },
-  { id: "cat_3", name: "Carnes", color: "#fee2e2" },
-  { id: "cat_4", name: "Laticínios", color: "#e0f2fe" },
-  { id: "cat_5", name: "Limpeza", color: "#f3e8ff" },
-  { id: "cat_6", name: "Geral", color: "#f1f5f9" }
+  { id: "cat_1", name: "Hortifrúti", color: "#dcfce7", isSystem: true },
+  { id: "cat_2", name: "Padaria", color: "#fef3c7", isSystem: true },
+  { id: "cat_3", name: "Carnes", color: "#fee2e2", isSystem: true },
+  { id: "cat_4", name: "Laticínios", color: "#e0f2fe", isSystem: true },
+  { id: "cat_5", name: "Limpeza", color: "#f3e8ff", isSystem: true },
+  { id: "cat_6", name: "Geral", color: "#f1f5f9", isSystem: true }
 ];
+
+function normalizeCategoryName(name) {
+  return String(name || "").trim().toLowerCase();
+}
+
+function isSystemCategory(catOrName) {
+  if (catOrName && typeof catOrName === "object" && catOrName.isSystem === true) {
+    return true;
+  }
+  const rawName = (catOrName && typeof catOrName === "object") ? catOrName.name : catOrName;
+  const norm = normalizeCategoryName(rawName);
+  return DEFAULT_CATEGORIES.some(c => normalizeCategoryName(c.name) === norm);
+}
+
+function normalizeCategories(categoriesList) {
+  const seenNames = new Set();
+  const result = DEFAULT_CATEGORIES.map(sysCat => {
+    seenNames.add(normalizeCategoryName(sysCat.name));
+    return { ...sysCat, isSystem: true };
+  });
+
+  if (Array.isArray(categoriesList)) {
+    categoriesList.forEach(cat => {
+      if (!cat || !cat.name) return;
+      const cleanName = String(cat.name).trim();
+      const norm = normalizeCategoryName(cleanName);
+      if (!norm || seenNames.has(norm)) return;
+
+      seenNames.add(norm);
+      result.push({
+        id: String(cat.id || ("cat_" + Date.now())),
+        name: cleanName,
+        color: cat.color || "#f1f5f9",
+        isSystem: false
+      });
+    });
+  }
+
+  return result;
+}
 
 // Estado da Aplicação
 let state = {
@@ -224,6 +264,10 @@ function setSession(token, user) {
 function logout() {
   state.token = null;
   state.currentUser = null;
+  state.lists = [];
+  state.catalog = [];
+  state.categories = normalizeCategories([]);
+  state.currentList = null;
   localStorage.removeItem(STORAGE_TOKEN_KEY);
   localStorage.removeItem(STORAGE_USER_KEY);
   document.getElementById('mainAppArea').style.display = 'none';
@@ -243,9 +287,7 @@ async function syncDataFromBackend() {
   if (data && data.ok) {
     state.lists = data.lists || [];
     state.catalog = data.catalog || [];
-    if (data.categories && data.categories.length > 0) {
-      state.categories = data.categories;
-    }
+    state.categories = normalizeCategories(data.categories);
   }
 }
 
@@ -350,7 +392,9 @@ async function deleteList(listId, displayTitle) {
   if (res && res.lists) {
     state.lists = res.lists;
     state.catalog = res.catalog || state.catalog;
-    if (res.categories && res.categories.length) state.categories = res.categories;
+    if (res.categories && res.categories.length) {
+      state.categories = normalizeCategories(res.categories);
+    }
   } else {
     state.lists = state.lists.filter(l => l.id !== listId);
   }
@@ -427,8 +471,21 @@ function openEditor() {
 
 function renderCategorySelect() {
   const sel = document.getElementById('itemCategory');
-  sel.innerHTML = state.categories.map(c => `<option value="${c.name}">${c.name}</option>`).join('');
-  sel.innerHTML += `<option value="__NEW__">+ Criar nova categoria/ala...</option>`;
+  const systemCats = state.categories.filter(c => isSystemCategory(c));
+  const customCats = state.categories.filter(c => !isSystemCategory(c));
+
+  let html = `<optgroup label="Padrão do Sistema">`;
+  html += systemCats.map(c => `<option value="${escapeHtml(c.name)}">${escapeHtml(c.name)}</option>`).join('');
+  html += `</optgroup>`;
+
+  if (customCats.length > 0) {
+    html += `<optgroup label="Minhas Categorias">`;
+    html += customCats.map(c => `<option value="${escapeHtml(c.name)}">${escapeHtml(c.name)}</option>`).join('');
+    html += `</optgroup>`;
+  }
+
+  html += `<option value="__NEW__">+ Criar nova categoria/ala...</option>`;
+  sel.innerHTML = html;
 }
 
 function checkCategorySelect(val) {
@@ -439,23 +496,42 @@ function checkCategorySelect(val) {
   }
 }
 
+function cancelInlineCategory() {
+  document.getElementById('inlineCatBox').style.display = "none";
+  document.getElementById('inlineCatName').value = "";
+  const sel = document.getElementById('itemCategory');
+  if (sel && state.categories.length > 0) {
+    sel.value = state.categories[0].name;
+  }
+}
+
+async function persistUserCategories() {
+  const customOnly = state.categories.filter(c => !isSystemCategory(c));
+  const res = await apiCall("saveCategories", { categories: customOnly });
+  if (res && res.ok && Array.isArray(res.categories)) {
+    state.categories = normalizeCategories(res.categories);
+  }
+}
+
 async function confirmInlineCategory() {
   const name = document.getElementById('inlineCatName').value.trim();
   const color = document.getElementById('inlineCatColor').value;
   if (!name) return alert("Digite o nome da categoria.");
 
-  const exists = state.categories.some(c => c.name.toLowerCase() === name.toLowerCase());
-  if (exists) {
-    alert("Esta categoria já existe!");
-    document.getElementById('itemCategory').value = name;
+  const existing = state.categories.find(c => normalizeCategoryName(c.name) === normalizeCategoryName(name));
+  if (existing) {
+    alert(`A categoria "${existing.name}" já existe e foi selecionada.`);
+    renderCategorySelect();
+    document.getElementById('itemCategory').value = existing.name;
     document.getElementById('inlineCatBox').style.display = "none";
+    document.getElementById('inlineCatName').value = "";
     return;
   }
 
-  const newCat = { id: "cat_" + Date.now(), name, color };
+  const newCat = { id: "cat_" + Date.now(), name, color, isSystem: false };
   state.categories.push(newCat);
 
-  await apiCall("saveCategories", { categories: state.categories });
+  await persistUserCategories();
 
   renderCategorySelect();
   document.getElementById('itemCategory').value = name;
@@ -663,7 +739,7 @@ async function saveAndEnterShoppingMode() {
     state.lists = res.lists;
     state.catalog = res.catalog;
     if (res.categories && res.categories.length) {
-      state.categories = res.categories;
+      state.categories = normalizeCategories(res.categories);
     }
   } else {
     const idx = state.lists.findIndex(l => l.id === state.currentList.id);
@@ -795,48 +871,98 @@ function renderCategoriesList() {
   const container = document.getElementById('categoriesListContainer');
   container.innerHTML = "";
 
-  state.categories.forEach((cat, idx) => {
+  const customCategories = state.categories.filter(cat => !isSystemCategory(cat));
+  const systemCategories = state.categories.filter(cat => isSystemCategory(cat));
+
+  // Seção 1: Categorias personalizadas do usuário
+  const customHeader = document.createElement('div');
+  customHeader.className = "small fw-semibold text-secondary mb-2";
+  customHeader.innerHTML = `<i class="bi bi-person-lock me-1"></i>Minhas Categorias (${customCategories.length})`;
+  container.appendChild(customHeader);
+
+  if (customCategories.length === 0) {
+    const emptyMsg = document.createElement('div');
+    emptyMsg.className = "text-muted small fst-italic p-2 mb-3 bg-light rounded border";
+    emptyMsg.innerText = "Você ainda não criou categorias personalizadas.";
+    container.appendChild(emptyMsg);
+  } else {
+    customCategories.forEach(cat => {
+      const item = document.createElement('div');
+      item.className = "d-flex justify-content-between align-items-center p-2 rounded mb-2 border";
+      item.style.backgroundColor = cat.color;
+      item.innerHTML = `
+        <div class="d-flex align-items-center gap-2">
+          <span class="fw-bold text-dark">${escapeHtml(cat.name)}</span>
+          <span class="badge bg-white text-secondary border" style="font-size: 0.7rem;">Pessoal</span>
+        </div>
+        <div class="d-flex gap-2 align-items-center">
+          <input type="color" class="form-control form-control-color form-control-sm" value="${escapeHtml(cat.color)}" onchange="updateCatColor('${escapeHtml(cat.id)}', this.value)" title="Mudar cor">
+          <button class="btn btn-sm btn-outline-danger" title="Excluir categoria" onclick="deleteCategory('${escapeHtml(cat.id)}')">
+            <i class="bi bi-trash3"></i>
+          </button>
+        </div>
+      `;
+      container.appendChild(item);
+    });
+  }
+
+  // Seção 2: Categorias padrão do sistema (somente leitura)
+  const sysHeader = document.createElement('div');
+  sysHeader.className = "small fw-semibold text-secondary mt-3 mb-2";
+  sysHeader.innerHTML = `<i class="bi bi-shield-check me-1"></i>Padrão do Sistema (${systemCategories.length})`;
+  container.appendChild(sysHeader);
+
+  systemCategories.forEach(cat => {
     const item = document.createElement('div');
     item.className = "d-flex justify-content-between align-items-center p-2 rounded mb-2 border";
     item.style.backgroundColor = cat.color;
     item.innerHTML = `
-      <span class="fw-bold text-dark">${cat.name}</span>
-      <div class="d-flex gap-2 align-items-center">
-        <input type="color" class="form-control form-control-color form-control-sm" value="${cat.color}" onchange="updateCatColor(${idx}, this.value)" title="Mudar cor">
-        <button class="btn btn-sm btn-outline-danger" onclick="deleteCategory(${idx})">
-          <i class="bi bi-trash3"></i>
-        </button>
-      </div>
+      <span class="fw-bold text-dark">${escapeHtml(cat.name)}</span>
+      <span class="badge bg-white text-muted border d-flex align-items-center gap-1" style="font-size: 0.72rem;" title="Categoria padrão do sistema">
+        <i class="bi bi-lock-fill"></i> Padrão
+      </span>
     `;
     container.appendChild(item);
   });
 }
 
 async function createCategoryFromManager() {
-  const name = document.getElementById('manageCatName').value.trim();
+  const inputEl = document.getElementById('manageCatName');
+  const name = inputEl.value.trim();
   const color = document.getElementById('manageCatColor').value;
   if (!name) return alert("Informe o nome da categoria.");
 
-  const exists = state.categories.some(c => c.name.toLowerCase() === name.toLowerCase());
-  if (exists) return alert("Esta categoria já existe.");
+  const exists = state.categories.some(c => normalizeCategoryName(c.name) === normalizeCategoryName(name));
+  if (exists) return alert("Já existe uma categoria (padrão ou pessoal) com este nome.");
 
-  state.categories.push({ id: "cat_" + Date.now(), name, color });
-  document.getElementById('manageCatName').value = "";
+  state.categories.push({ id: "cat_" + Date.now(), name, color, isSystem: false });
+  inputEl.value = "";
   renderCategoriesList();
-  await apiCall("saveCategories", { categories: state.categories });
+  await persistUserCategories();
+  renderCategoriesList();
 }
 
-async function updateCatColor(idx, color) {
-  state.categories[idx].color = color;
+async function updateCatColor(catId, color) {
+  const target = state.categories.find(c => c.id === catId && !isSystemCategory(c));
+  if (!target) return;
+  target.color = color;
   renderCategoriesList();
-  await apiCall("saveCategories", { categories: state.categories });
+  await persistUserCategories();
+  renderCategoriesList();
 }
 
-async function deleteCategory(idx) {
-  if (!confirm("Deseja excluir esta categoria?")) return;
-  state.categories.splice(idx, 1);
+async function deleteCategory(catId) {
+  const target = state.categories.find(c => c.id === catId);
+  if (!target) return;
+  if (isSystemCategory(target)) {
+    return alert("Categorias padrão do sistema não podem ser excluídas.");
+  }
+  if (!confirm(`Deseja excluir a categoria personalizada "${target.name}"?`)) return;
+
+  state.categories = state.categories.filter(c => c.id !== catId);
   renderCategoriesList();
-  await apiCall("saveCategories", { categories: state.categories });
+  await persistUserCategories();
+  renderCategoriesList();
 }
 
 function goHome() {

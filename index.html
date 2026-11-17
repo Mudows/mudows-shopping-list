@@ -231,11 +231,12 @@
             </div>
 
             <div id="inlineCatBox" class="p-3 bg-light rounded border mb-3" style="display: none;">
-              <label class="form-label small fw-semibold">Criar nova categoria/ala</label>
+              <label class="form-label small fw-semibold">Criar nova categoria/ala (pessoal)</label>
               <div class="d-flex gap-2 align-items-center">
-                <input type="text" id="inlineCatName" class="form-control form-control-sm" placeholder="Nome da ala">
+                <input type="text" id="inlineCatName" class="form-control form-control-sm" placeholder="Nome da ala" onkeydown="if(event.key==='Enter'){event.preventDefault();confirmInlineCategory();}else if(event.key==='Escape'){cancelInlineCategory();}">
                 <input type="color" id="inlineCatColor" class="form-control form-control-color form-control-sm" value="#bae6fd" title="Escolha a cor">
-                <button type="button" class="btn btn-sm btn-primary" onclick="confirmInlineCategory()">Criar e Salvar</button>
+                <button type="button" class="btn btn-sm btn-primary text-nowrap" onclick="confirmInlineCategory()">Criar e Salvar</button>
+                <button type="button" class="btn btn-sm btn-outline-secondary" onclick="cancelInlineCategory()" title="Cancelar">Cancelar</button>
               </div>
             </div>
 
@@ -277,9 +278,10 @@
       <section id="viewCategories" class="view-section">
         <div class="card shadow-sm border-0 mb-3">
           <div class="card-body">
-            <h6 class="card-subtitle mb-3 text-muted fw-bold">Nova Categoria</h6>
+            <h6 class="card-subtitle mb-1 text-muted fw-bold">Nova Categoria Personalizada</h6>
+            <p class="text-muted small mb-3">Categorias criadas por você são exclusivas da sua conta.</p>
             <div class="d-flex gap-2 align-items-center">
-              <input type="text" id="manageCatName" class="form-control" placeholder="Nome da categoria (ex: Hortifrúti)">
+              <input type="text" id="manageCatName" class="form-control" placeholder="Nome da categoria (ex: Bebidas)" onkeydown="if(event.key==='Enter'){event.preventDefault();createCategoryFromManager();}">
               <input type="color" id="manageCatColor" class="form-control form-control-color" value="#cbd5e1" title="Cor da categoria">
               <button class="btn btn-primary text-nowrap" onclick="createCategoryFromManager()">Adicionar</button>
             </div>
@@ -288,7 +290,7 @@
 
         <div class="card shadow-sm border-0 mb-3">
           <div class="card-body">
-            <h6 class="card-subtitle mb-3 text-muted fw-bold">Categorias Cadastradas</h6>
+            <h6 class="card-subtitle mb-3 text-muted fw-bold">Categorias Disponíveis</h6>
             <div id="categoriesListContainer"></div>
           </div>
         </div>
