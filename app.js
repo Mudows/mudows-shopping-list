@@ -93,6 +93,40 @@ function saveLocalCache() {
   }
 }
 
+function isValidIsoDate(val) {
+  return typeof val === "string" && /^\d{4}-\d{2}-\d{2}$/.test(val.trim());
+}
+
+function sanitizeListObject(list, localFallback = null) {
+  if (!list || typeof list !== "object") return list;
+  let cleanDate = String(list.date || "").trim();
+  let cleanName = String(list.name || "").trim();
+
+  if (cleanDate.startsWith("user_")) cleanDate = "";
+  if (cleanName.startsWith("user_")) cleanName = "";
+
+  if (!isValidIsoDate(cleanDate) && isValidIsoDate(cleanName)) {
+    cleanDate = cleanName;
+  }
+
+  // Se o servidor retornou data vazia/corrompida mas o cache local já tem uma data válida para esta lista, preserva a data local
+  if (!isValidIsoDate(cleanDate) && localFallback && isValidIsoDate(localFallback.date)) {
+    cleanDate = localFallback.date.trim();
+  }
+
+  if (cleanDate && (!cleanName || cleanName !== cleanDate)) {
+    cleanName = cleanDate;
+  }
+
+  return {
+    ...list,
+    date: cleanDate,
+    name: cleanName || cleanDate,
+    status: (list.status === "concluida" || list.status === "comprando") ? list.status : "comprando",
+    items: Array.isArray(list.items) ? list.items : []
+  };
+}
+
 function loadLocalCache() {
   const key = getUserCacheKey();
   if (!key) return false;
@@ -101,7 +135,7 @@ function loadLocalCache() {
     if (!raw) return false;
     const parsed = JSON.parse(raw);
     if (!parsed || typeof parsed !== "object") return false;
-    state.lists = Array.isArray(parsed.lists) ? parsed.lists : [];
+    state.lists = Array.isArray(parsed.lists) ? parsed.lists.map(l => sanitizeListObject(l)) : [];
     state.catalog = Array.isArray(parsed.catalog) ? parsed.catalog : [];
     state.categories = normalizeCategories(parsed.categories);
     return true;
@@ -270,6 +304,33 @@ function discardDraft() {
 }
 
 function leaveEditorSafely() {
+  if (!state.currentList) {
+    renderHome();
+    return;
+  }
+
+  const dateInput = (document.getElementById('listDate').value || "").trim();
+  const isExisting = state.lists.some(l => l.id === state.currentList.id);
+
+  // Se a lista já existe no histórico (modo edição), valida a data e salva a alteração definitivamente
+  if (isExisting) {
+    if (!isValidIsoDate(dateInput)) {
+      alert("A data da compra é obrigatória. Selecione uma data válida.");
+      document.getElementById('listDate').focus();
+      return;
+    }
+    state.currentList.date = dateInput;
+    state.currentList.name = dateInput;
+    const listSnapshot = sanitizeListObject(JSON.parse(JSON.stringify(state.currentList)));
+    const idx = state.lists.findIndex(l => l.id === listSnapshot.id);
+    if (idx >= 0) state.lists[idx] = listSnapshot;
+    saveLocalCache();
+    clearDraftStorage();
+    renderHome();
+    apiCall("updateList", { list: listSnapshot }, { silent: true });
+    return;
+  }
+
   saveDraftToStorage();
   renderHome();
 }
@@ -445,8 +506,15 @@ async function syncDataFromBackend(options = { silent: true }) {
   if (!state.token) return;
   const data = await apiCall("getData", {}, options);
   if (data && data.ok) {
-    state.lists = data.lists || [];
-    state.catalog = data.catalog || [];
+    const localMap = {};
+    (state.lists || []).forEach(l => {
+      if (l && l.id) localMap[l.id] = l;
+    });
+
+    state.lists = (data.lists || []).map(remoteList => {
+      return sanitizeListObject(remoteList, localMap[remoteList.id] || null);
+    });
+    state.catalog = (data.catalog || []).filter(c => c && !String(c.name || "").startsWith("user_"));
     state.categories = normalizeCategories(data.categories);
     saveLocalCache();
 
@@ -602,25 +670,26 @@ function cloneList(sourceId) {
 function editList(listId) {
   const src = state.lists.find(x => x.id === listId);
   if (!src) return;
-  state.currentList = JSON.parse(JSON.stringify(src));
+  state.currentList = sanitizeListObject(JSON.parse(JSON.stringify(src)));
   saveDraftToStorage();
   openEditor();
 }
 
 function updateTitleFromDate(dateValue) {
-  const finalDate = dateValue || getTodayIsoDate();
-  state.currentList.date = finalDate;
-  state.currentList.name = finalDate;
-  document.getElementById('generatedTitlePreview').innerText = finalDate;
-  document.getElementById('pageTitle').innerText = finalDate;
+  const cleanDate = (dateValue || "").trim();
+  state.currentList.date = cleanDate;
+  state.currentList.name = cleanDate;
+  const previewText = cleanDate || "Selecione uma data";
+  document.getElementById('generatedTitlePreview').innerText = previewText;
+  document.getElementById('pageTitle').innerText = previewText;
   saveDraftToStorage();
 }
 
 function openEditor() {
   switchView('viewEditor');
-  const listDate = state.currentList.date || getTodayIsoDate();
-  document.getElementById('listDate').value = listDate;
-  updateTitleFromDate(listDate);
+  const rawDate = (state.currentList && isValidIsoDate(state.currentList.date)) ? state.currentList.date : getTodayIsoDate();
+  document.getElementById('listDate').value = rawDate;
+  updateTitleFromDate(rawDate);
   renderCategorySelect();
   renderEditorItems();
   hideAutocomplete();
@@ -889,7 +958,13 @@ function renderEditorItems() {
 }
 
 function saveAndEnterShoppingMode() {
-  const dateInput = document.getElementById('listDate').value || getTodayIsoDate();
+  const dateInput = (document.getElementById('listDate').value || "").trim();
+  if (!isValidIsoDate(dateInput)) {
+    alert("Por favor, selecione uma data válida para a compra antes de salvar.");
+    document.getElementById('listDate').focus();
+    return;
+  }
+
   state.currentList.date = dateInput;
   state.currentList.name = dateInput;
 
@@ -898,7 +973,7 @@ function saveAndEnterShoppingMode() {
 
   // Local-First: atualiza o estado e o cache do navegador imediatamente
   const idx = state.lists.findIndex(l => l.id === state.currentList.id);
-  const listSnapshot = JSON.parse(JSON.stringify(state.currentList));
+  const listSnapshot = sanitizeListObject(JSON.parse(JSON.stringify(state.currentList)));
   if (idx >= 0) state.lists[idx] = listSnapshot;
   else state.lists.push(listSnapshot);
 

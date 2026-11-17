@@ -225,8 +225,8 @@
         <div class="card shadow-sm border-0 mb-3">
           <div class="card-body">
             <div>
-              <label class="form-label small fw-semibold text-muted">Quando será realizada a compra?</label>
-              <input type="date" id="listDate" class="form-control" onchange="updateTitleFromDate(this.value)">
+              <label class="form-label small fw-semibold text-muted" for="listDate">Quando será realizada a compra? <span class="text-danger">*</span></label>
+              <input type="date" id="listDate" class="form-control" required onchange="updateTitleFromDate(this.value)">
               <div class="form-text small text-secondary">
                 Título da lista: <strong id="generatedTitlePreview" class="text-dark">AAAA-MM-DD</strong>
               </div>
