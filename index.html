@@ -131,16 +131,31 @@
 
           <form id="authForm" onsubmit="handleAuthSubmit(event)">
             <div class="mb-3" id="nameFieldGroup" style="display: none;">
-              <label class="form-label small fw-semibold text-muted">Nome</label>
+              <label class="form-label small fw-semibold text-muted" for="authName">Nome de Exibição</label>
               <input type="text" id="authName" class="form-control" placeholder="Seu nome">
             </div>
             <div class="mb-3">
-              <label class="form-label small fw-semibold text-muted">E-mail</label>
+              <label class="form-label small fw-semibold text-muted" for="authEmail">E-mail</label>
               <input type="email" id="authEmail" class="form-control" placeholder="seu@email.com" required>
             </div>
-            <div class="mb-4">
-              <label class="form-label small fw-semibold text-muted">Senha</label>
-              <input type="password" id="authPassword" class="form-control" placeholder="sua senha" required>
+            <div class="mb-3">
+              <label class="form-label small fw-semibold text-muted" for="authPassword">Senha</label>
+              <div class="input-group">
+                <input type="password" id="authPassword" class="form-control" placeholder="sua senha" required oninput="validateAuthPasswordsLive()">
+                <button class="btn btn-outline-secondary" type="button" onclick="togglePasswordVisibility('authPassword', this)" title="Mostrar ou ocultar senha" aria-label="Mostrar ou ocultar senha">
+                  <i class="bi bi-eye"></i>
+                </button>
+              </div>
+            </div>
+            <div class="mb-4" id="confirmPasswordGroup" style="display: none;">
+              <label class="form-label small fw-semibold text-muted" for="authConfirmPassword">Confirmar Senha</label>
+              <div class="input-group">
+                <input type="password" id="authConfirmPassword" class="form-control" placeholder="digite a senha novamente" oninput="validateAuthPasswordsLive()">
+                <button class="btn btn-outline-secondary" type="button" onclick="togglePasswordVisibility('authConfirmPassword', this)" title="Mostrar ou ocultar confirmação de senha" aria-label="Mostrar ou ocultar confirmação de senha">
+                  <i class="bi bi-eye"></i>
+                </button>
+              </div>
+              <div id="authPasswordFeedback" class="form-text small d-none"></div>
             </div>
 
             <button type="submit" class="btn btn-primary w-100 py-2 fw-semibold" id="authSubmitBtn">Entrar</button>
@@ -161,11 +176,19 @@
       <header class="d-flex justify-content-between align-items-center mb-4 pb-2 border-bottom">
         <div>
           <h1 class="h3 fw-bold mb-0 text-dark" id="pageTitle">Minhas Listas</h1>
-          <span class="small text-muted" id="userBadge"></span>
+          <div class="d-flex align-items-center flex-wrap gap-2 mt-1">
+            <span class="small text-muted" id="userBadge"></span>
+            <span id="syncStatusBadge" class="badge rounded-pill bg-light text-secondary border d-none" style="font-size: 0.7rem; font-weight: 500;"></span>
+          </div>
         </div>
-        <button class="btn btn-outline-danger btn-sm d-flex align-items-center gap-1" onclick="logout()">
-          <i class="bi bi-box-arrow-right"></i> Sair
-        </button>
+        <div class="d-flex align-items-center gap-2">
+          <button class="btn btn-outline-secondary btn-sm d-flex align-items-center gap-1" onclick="openSettingsView()" title="Configurações da Conta e Categorias">
+            <i class="bi bi-gear-fill"></i> <span class="d-none d-sm-inline">Configurações</span>
+          </button>
+          <button class="btn btn-outline-danger btn-sm d-flex align-items-center gap-1" onclick="logout()" title="Sair da conta">
+            <i class="bi bi-box-arrow-right"></i> <span class="d-none d-sm-inline">Sair</span>
+          </button>
+        </div>
       </header>
 
       <!-- Alerta de Rascunho em Andamento recuperável -->
@@ -274,23 +297,93 @@
         <div id="shoppingItemsContainer"></div>
       </section>
 
-      <!-- TELA 4: GERENCIAR CATEGORIAS -->
+      <!-- TELA 4: CONFIGURAÇÕES (PERFIL, SENHA E CATEGORIAS) -->
       <section id="viewCategories" class="view-section">
+        <div class="d-flex justify-content-between align-items-center mb-3">
+          <button class="btn btn-outline-secondary btn-sm d-flex align-items-center gap-1" onclick="goHome()">
+            <i class="bi bi-arrow-left"></i> Voltar para Listas
+          </button>
+        </div>
+
+        <!-- Card 1: Perfil do Usuário -->
         <div class="card shadow-sm border-0 mb-3">
           <div class="card-body">
-            <h6 class="card-subtitle mb-1 text-muted fw-bold">Nova Categoria Personalizada</h6>
-            <p class="text-muted small mb-3">Categorias criadas por você são exclusivas da sua conta.</p>
-            <div class="d-flex gap-2 align-items-center">
-              <input type="text" id="manageCatName" class="form-control" placeholder="Nome da categoria (ex: Bebidas)" onkeydown="if(event.key==='Enter'){event.preventDefault();createCategoryFromManager();}">
-              <input type="color" id="manageCatColor" class="form-control form-control-color" value="#cbd5e1" title="Cor da categoria">
-              <button class="btn btn-primary text-nowrap" onclick="createCategoryFromManager()">Adicionar</button>
-            </div>
+            <h6 class="card-subtitle mb-1 text-muted fw-bold"><i class="bi bi-person-badge me-1"></i>Perfil da Conta</h6>
+            <p class="text-muted small mb-3">Altere como seu nome é exibido no aplicativo.</p>
+            <form onsubmit="handleUpdateProfile(event)">
+              <div class="row g-2 align-items-end">
+                <div class="col-12 col-sm-5">
+                  <label class="form-label small fw-semibold text-muted mb-1">E-mail (login)</label>
+                  <input type="email" id="settingsEmailDisplay" class="form-control form-control-sm bg-light" disabled readonly>
+                </div>
+                <div class="col-12 col-sm-5">
+                  <label class="form-label small fw-semibold text-muted mb-1" for="settingsNameInput">Nome de Tela</label>
+                  <input type="text" id="settingsNameInput" class="form-control form-control-sm" placeholder="Seu nome" required>
+                </div>
+                <div class="col-12 col-sm-2">
+                  <button type="submit" class="btn btn-sm btn-primary w-100" id="saveProfileBtn">Salvar</button>
+                </div>
+              </div>
+              <div id="profileFeedback" class="small mt-2 d-none"></div>
+            </form>
           </div>
         </div>
 
+        <!-- Card 2: Alterar Senha -->
         <div class="card shadow-sm border-0 mb-3">
           <div class="card-body">
-            <h6 class="card-subtitle mb-3 text-muted fw-bold">Categorias Disponíveis</h6>
+            <h6 class="card-subtitle mb-1 text-muted fw-bold"><i class="bi bi-key-fill me-1"></i>Alterar Senha</h6>
+            <p class="text-muted small mb-3">Informe sua senha atual e confirme a nova senha.</p>
+            <form id="changePasswordForm" onsubmit="handleChangePassword(event)">
+              <div class="row g-2 mb-2">
+                <div class="col-12 col-md-4">
+                  <label class="form-label small fw-semibold text-muted mb-1" for="settingsCurrentPassword">Senha Atual</label>
+                  <div class="input-group input-group-sm">
+                    <input type="password" id="settingsCurrentPassword" class="form-control" placeholder="Senha atual" required>
+                    <button class="btn btn-outline-secondary" type="button" onclick="togglePasswordVisibility('settingsCurrentPassword', this)" title="Mostrar ou ocultar senha">
+                      <i class="bi bi-eye"></i>
+                    </button>
+                  </div>
+                </div>
+                <div class="col-12 col-md-4">
+                  <label class="form-label small fw-semibold text-muted mb-1" for="settingsNewPassword">Nova Senha</label>
+                  <div class="input-group input-group-sm">
+                    <input type="password" id="settingsNewPassword" class="form-control" placeholder="Nova senha" required oninput="validateSettingsPasswordsLive()">
+                    <button class="btn btn-outline-secondary" type="button" onclick="togglePasswordVisibility('settingsNewPassword', this)" title="Mostrar ou ocultar senha">
+                      <i class="bi bi-eye"></i>
+                    </button>
+                  </div>
+                </div>
+                <div class="col-12 col-md-4">
+                  <label class="form-label small fw-semibold text-muted mb-1" for="settingsConfirmPassword">Confirmar Nova Senha</label>
+                  <div class="input-group input-group-sm">
+                    <input type="password" id="settingsConfirmPassword" class="form-control" placeholder="Repita a nova senha" required oninput="validateSettingsPasswordsLive()">
+                    <button class="btn btn-outline-secondary" type="button" onclick="togglePasswordVisibility('settingsConfirmPassword', this)" title="Mostrar ou ocultar senha">
+                      <i class="bi bi-eye"></i>
+                    </button>
+                  </div>
+                </div>
+              </div>
+              <div class="d-flex justify-content-between align-items-center mt-2">
+                <div id="passwordChangeFeedback" class="small d-none"></div>
+                <button type="submit" class="btn btn-sm btn-outline-primary ms-auto" id="changePasswordBtn">Atualizar Senha</button>
+              </div>
+            </form>
+          </div>
+        </div>
+
+        <!-- Card 3: Gerenciar Categorias Pessoais -->
+        <div class="card shadow-sm border-0 mb-3" id="settingsCategoriesSection">
+          <div class="card-body">
+            <h6 class="card-subtitle mb-1 text-muted fw-bold"><i class="bi bi-tags-fill me-1"></i>Gerenciar Categorias Pessoais</h6>
+            <p class="text-muted small mb-3">Adicione, edite o nome ou a cor, ou exclua suas categorias exclusivas.</p>
+            <div class="d-flex gap-2 align-items-center mb-3 pb-3 border-bottom">
+              <input type="text" id="manageCatName" class="form-control form-control-sm" placeholder="Nova categoria (ex: Bebidas)" onkeydown="if(event.key==='Enter'){event.preventDefault();createCategoryFromManager();}">
+              <input type="color" id="manageCatColor" class="form-control form-control-color form-control-sm" value="#cbd5e1" title="Cor da categoria">
+              <button class="btn btn-sm btn-primary text-nowrap" onclick="createCategoryFromManager()">
+                <i class="bi bi-plus-lg"></i> Adicionar
+              </button>
+            </div>
             <div id="categoriesListContainer"></div>
           </div>
         </div>

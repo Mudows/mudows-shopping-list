@@ -1,4 +1,4 @@
-const CACHE_NAME = 'compras-pwa-v3';
+const CACHE_NAME = 'compras-pwa-v4';
 const ASSETS_TO_CACHE = [
   './index.html',
   './app.js',

@@ -70,6 +70,59 @@ let state = {
 
 let currentFocusIndex = -1;
 let deferredPrompt = null;
+let pendingSyncCount = 0;
+let editingCategoryId = null;
+
+function getUserCacheKey() {
+  const uid = state.currentUser && state.currentUser.id ? state.currentUser.id : null;
+  return uid ? `compras_userdata_${uid}` : null;
+}
+
+function saveLocalCache() {
+  const key = getUserCacheKey();
+  if (!key) return;
+  try {
+    localStorage.setItem(key, JSON.stringify({
+      lists: state.lists,
+      catalog: state.catalog,
+      categories: state.categories,
+      updatedAt: Date.now()
+    }));
+  } catch (e) {
+    console.warn("Não foi possível salvar cache local:", e);
+  }
+}
+
+function loadLocalCache() {
+  const key = getUserCacheKey();
+  if (!key) return false;
+  try {
+    const raw = localStorage.getItem(key);
+    if (!raw) return false;
+    const parsed = JSON.parse(raw);
+    if (!parsed || typeof parsed !== "object") return false;
+    state.lists = Array.isArray(parsed.lists) ? parsed.lists : [];
+    state.catalog = Array.isArray(parsed.catalog) ? parsed.catalog : [];
+    state.categories = normalizeCategories(parsed.categories);
+    return true;
+  } catch (e) {
+    return false;
+  }
+}
+
+function updateSyncBadge(status) {
+  const badge = document.getElementById('syncStatusBadge');
+  if (!badge) return;
+  badge.classList.remove('d-none');
+
+  if (pendingSyncCount > 0 || status === 'syncing') {
+    badge.innerHTML = `<span class="spinner-border spinner-border-sm text-primary me-1" style="width: 0.65rem; height: 0.65rem; border-width: 0.12em;"></span>Sincronizando...`;
+  } else if (status === 'error') {
+    badge.innerHTML = `<i class="bi bi-cloud-slash text-warning-emphasis me-1"></i>Salvo no aparelho`;
+  } else {
+    badge.innerHTML = `<i class="bi bi-cloud-check text-success me-1"></i>Sincronizado`;
+  }
+}
 
 // PWA Service Worker
 if ('serviceWorker' in navigator) {
@@ -109,10 +162,17 @@ function dismissInstallBanner() {
   }
 }
 
-// Requisições seguras compatíveis com origin local
-async function apiCall(action, payload = {}) {
+// Requisições seguras compatíveis com origin local (suporta modo bloqueante e modo silencioso/assíncrono)
+async function apiCall(action, payload = {}, options = {}) {
+  const isSilent = !!options.silent;
   const overlay = document.getElementById('loadingOverlay');
-  overlay.style.display = 'flex';
+
+  if (isSilent) {
+    pendingSyncCount++;
+    updateSyncBadge('syncing');
+  } else if (overlay) {
+    overlay.style.display = 'flex';
+  }
 
   try {
     const formBody = new URLSearchParams();
@@ -140,13 +200,25 @@ async function apiCall(action, payload = {}) {
       return null;
     }
 
+    if (isSilent) {
+      pendingSyncCount = Math.max(0, pendingSyncCount - 1);
+      updateSyncBadge(data && data.ok === false ? 'error' : 'synced');
+    }
+
     return data;
   } catch (err) {
     console.error("Erro na requisição:", err);
-    alert("Falha de conexão com o Google Apps Script.\nCertifique-se de que a nova versão do código foi implantada no Apps Script com acesso para 'Qualquer pessoa'.");
+    if (isSilent) {
+      pendingSyncCount = Math.max(0, pendingSyncCount - 1);
+      updateSyncBadge('error');
+    } else {
+      alert("Falha de conexão com o Google Apps Script.\nCertifique-se de que a nova versão do código foi implantada no Apps Script com acesso para 'Qualquer pessoa'.");
+    }
     return null;
   } finally {
-    overlay.style.display = 'none';
+    if (!isSilent && overlay) {
+      overlay.style.display = 'none';
+    }
   }
 }
 
@@ -217,6 +289,58 @@ document.addEventListener('visibilitychange', () => {
 // ==========================================
 // AUTENTICAÇÃO E CONTAS
 // ==========================================
+function togglePasswordVisibility(inputId, btnEl) {
+  const input = document.getElementById(inputId);
+  if (!input) return;
+  const isPassword = input.type === "password";
+  input.type = isPassword ? "text" : "password";
+
+  if (btnEl) {
+    const icon = btnEl.querySelector('i');
+    if (icon) {
+      icon.className = isPassword ? "bi bi-eye-slash" : "bi bi-eye";
+    }
+  }
+}
+
+function resetPasswordInputMask(inputId) {
+  const input = document.getElementById(inputId);
+  if (!input) return;
+  input.type = "password";
+  const group = input.closest('.input-group');
+  if (group) {
+    const icon = group.querySelector('button i');
+    if (icon) icon.className = "bi bi-eye";
+  }
+}
+
+function validateAuthPasswordsLive() {
+  const feedback = document.getElementById('authPasswordFeedback');
+  if (!feedback) return;
+
+  if (state.authMode !== "register") {
+    feedback.classList.add('d-none');
+    return;
+  }
+
+  const pass = document.getElementById('authPassword').value;
+  const confirmPass = document.getElementById('authConfirmPassword').value;
+
+  if (!confirmPass) {
+    feedback.classList.add('d-none');
+    return;
+  }
+
+  feedback.classList.remove('d-none', 'text-success', 'text-danger');
+  if (pass === confirmPass) {
+    feedback.classList.add('text-success');
+    feedback.innerHTML = `<i class="bi bi-check-circle-fill me-1"></i>As senhas coincidem.`;
+  } else {
+    feedback.classList.add('text-danger');
+    feedback.innerHTML = `<i class="bi bi-exclamation-circle-fill me-1"></i>As senhas não coincidem.`;
+  }
+}
+
 function toggleAuthMode() {
   state.authMode = state.authMode === "login" ? "register" : "login";
   const isReg = state.authMode === "register";
@@ -225,13 +349,21 @@ function toggleAuthMode() {
   document.getElementById('authSubtitle').innerText = isReg ? "Crie sua conta para manter suas listas salvas com segurança." : "Entre com suas credenciais para visualizar e alterar os dados.";
   document.getElementById('authSubmitBtn').innerText = isReg ? "Cadastrar" : "Entrar";
   document.getElementById('nameFieldGroup').style.display = isReg ? "block" : "none";
+  document.getElementById('confirmPasswordGroup').style.display = isReg ? "block" : "none";
+  document.getElementById('authConfirmPassword').required = isReg;
+  document.getElementById('authConfirmPassword').value = "";
   document.getElementById('toggleAuthModeBtn').innerText = isReg ? "Já tem conta? Fazer login" : "Não tem conta? Criar nova conta";
+
+  resetPasswordInputMask('authPassword');
+  resetPasswordInputMask('authConfirmPassword');
+  validateAuthPasswordsLive();
 }
 
 async function handleAuthSubmit(e) {
   e.preventDefault();
   const email = document.getElementById('authEmail').value.trim();
   const password = document.getElementById('authPassword').value;
+  const confirmPassword = document.getElementById('authConfirmPassword').value;
   const name = document.getElementById('authName').value.trim();
 
   if (state.authMode === "login") {
@@ -240,9 +372,20 @@ async function handleAuthSubmit(e) {
       setSession(res.token, res.user);
       await enterApp();
     } else {
-      alert((res && res.error) || "Falha no login. Verifique se publicou a nova versão no Apps Script.");
+      alert((res && res.error) || "Falha no login. Verifique suas credenciais.");
     }
   } else {
+    if (password.length < 4) {
+      alert("A senha deve ter pelo menos 4 caracteres.");
+      document.getElementById('authPassword').focus();
+      return;
+    }
+    if (password !== confirmPassword) {
+      alert("A confirmação de senha não confere. Digite a mesma senha nos dois campos.");
+      document.getElementById('authConfirmPassword').focus();
+      return;
+    }
+
     const res = await apiCall("register", { email, password, name });
     if (res && res.ok) {
       alert("Conta criada com sucesso!");
@@ -259,6 +402,14 @@ function setSession(token, user) {
   state.currentUser = user;
   localStorage.setItem(STORAGE_TOKEN_KEY, token);
   localStorage.setItem(STORAGE_USER_KEY, JSON.stringify(user));
+  updateUserBadge();
+}
+
+function updateUserBadge() {
+  const badge = document.getElementById('userBadge');
+  if (badge) {
+    badge.innerText = `Logado como: ${state.currentUser ? (state.currentUser.name || state.currentUser.email) : ''}`;
+  }
 }
 
 function logout() {
@@ -268,6 +419,7 @@ function logout() {
   state.catalog = [];
   state.categories = normalizeCategories([]);
   state.currentList = null;
+  editingCategoryId = null;
   localStorage.removeItem(STORAGE_TOKEN_KEY);
   localStorage.removeItem(STORAGE_USER_KEY);
   document.getElementById('mainAppArea').style.display = 'none';
@@ -276,18 +428,34 @@ function logout() {
 
 async function enterApp() {
   document.getElementById('mainAppArea').style.display = 'block';
-  document.getElementById('userBadge').innerText = `Logado como: ${state.currentUser ? (state.currentUser.name || state.currentUser.email) : ''}`;
-  await syncDataFromBackend();
-  renderHome();
+  updateUserBadge();
+
+  // Local-First: se já houver cache local do usuário, abre a tela imediatamente e sincroniza em background
+  const hasCache = loadLocalCache();
+  if (hasCache) {
+    renderHome();
+    syncDataFromBackend({ silent: true });
+  } else {
+    await syncDataFromBackend({ silent: false });
+    renderHome();
+  }
 }
 
-async function syncDataFromBackend() {
+async function syncDataFromBackend(options = { silent: true }) {
   if (!state.token) return;
-  const data = await apiCall("getData");
+  const data = await apiCall("getData", {}, options);
   if (data && data.ok) {
     state.lists = data.lists || [];
     state.catalog = data.catalog || [];
     state.categories = normalizeCategories(data.categories);
+    saveLocalCache();
+
+    // Se o usuário estiver na Home, atualiza a listagem silenciosamente
+    if (document.getElementById('viewHome').classList.contains('active')) {
+      renderHome();
+    } else if (document.getElementById('viewCategories').classList.contains('active') && !editingCategoryId) {
+      renderCategoriesList();
+    }
   }
 }
 
@@ -388,25 +556,18 @@ function renderHome() {
 async function deleteList(listId, displayTitle) {
   if (!confirm(`Tem certeza de que deseja excluir permanentemente a lista "${displayTitle}"?`)) return;
 
-  const res = await apiCall("deleteList", { listId: listId });
-  if (res && res.lists) {
-    state.lists = res.lists;
-    state.catalog = res.catalog || state.catalog;
-    if (res.categories && res.categories.length) {
-      state.categories = normalizeCategories(res.categories);
-    }
-  } else {
-    state.lists = state.lists.filter(l => l.id !== listId);
-  }
+  // Local-First: remove imediatamente na UI e no cache local, sincronizando em background
+  state.lists = state.lists.filter(l => l.id !== listId);
+  saveLocalCache();
   renderHome();
+
+  apiCall("deleteList", { listId: listId }, { silent: true });
 }
 
 // ========================================================
 // TELA 2: EDIÇÃO DE LISTA
 // ========================================================
-async function startNewList() {
-  await syncDataFromBackend();
-
+function startNewList() {
   const defaultDate = getTodayIsoDate();
   state.currentList = {
     id: "list_" + Date.now(),
@@ -419,9 +580,7 @@ async function startNewList() {
   openEditor();
 }
 
-async function cloneList(sourceId) {
-  await syncDataFromBackend();
-
+function cloneList(sourceId) {
   const src = state.lists.find(x => x.id === sourceId);
   if (!src) return;
   const today = getTodayIsoDate();
@@ -440,9 +599,7 @@ async function cloneList(sourceId) {
   openEditor();
 }
 
-async function editList(listId) {
-  await syncDataFromBackend();
-
+function editList(listId) {
   const src = state.lists.find(x => x.id === listId);
   if (!src) return;
   state.currentList = JSON.parse(JSON.stringify(src));
@@ -505,11 +662,15 @@ function cancelInlineCategory() {
   }
 }
 
-async function persistUserCategories() {
+async function persistUserCategories(renames = null) {
+  saveLocalCache();
   const customOnly = state.categories.filter(c => !isSystemCategory(c));
-  const res = await apiCall("saveCategories", { categories: customOnly });
+  const payload = { categories: customOnly };
+  if (renames) payload.renames = renames;
+  const res = await apiCall("saveCategories", payload, { silent: true });
   if (res && res.ok && Array.isArray(res.categories)) {
     state.categories = normalizeCategories(res.categories);
+    saveLocalCache();
   }
 }
 
@@ -531,13 +692,13 @@ async function confirmInlineCategory() {
   const newCat = { id: "cat_" + Date.now(), name, color, isSystem: false };
   state.categories.push(newCat);
 
-  await persistUserCategories();
-
   renderCategorySelect();
   document.getElementById('itemCategory').value = name;
   document.getElementById('inlineCatBox').style.display = "none";
   document.getElementById('inlineCatName').value = "";
   saveDraftToStorage();
+
+  persistUserCategories();
 }
 
 // ==========================================
@@ -678,6 +839,7 @@ function addItemToList() {
   const existsInCatalog = state.catalog.some(c => c.name.toLowerCase() === name.toLowerCase());
   if (!existsInCatalog) {
     state.catalog.push({ id: "cat_item_" + Date.now(), name, category: cat });
+    saveLocalCache();
   }
 
   document.getElementById('itemName').value = "";
@@ -726,7 +888,7 @@ function renderEditorItems() {
   });
 }
 
-async function saveAndEnterShoppingMode() {
+function saveAndEnterShoppingMode() {
   const dateInput = document.getElementById('listDate').value || getTodayIsoDate();
   state.currentList.date = dateInput;
   state.currentList.name = dateInput;
@@ -734,22 +896,18 @@ async function saveAndEnterShoppingMode() {
   const isExisting = state.lists.some(l => l.id === state.currentList.id);
   const action = isExisting ? "updateList" : "saveList";
 
-  const res = await apiCall(action, { list: state.currentList });
-  if (res && res.lists) {
-    state.lists = res.lists;
-    state.catalog = res.catalog;
-    if (res.categories && res.categories.length) {
-      state.categories = normalizeCategories(res.categories);
-    }
-  } else {
-    const idx = state.lists.findIndex(l => l.id === state.currentList.id);
-    if (idx >= 0) state.lists[idx] = state.currentList;
-    else state.lists.push(state.currentList);
-  }
+  // Local-First: atualiza o estado e o cache do navegador imediatamente
+  const idx = state.lists.findIndex(l => l.id === state.currentList.id);
+  const listSnapshot = JSON.parse(JSON.stringify(state.currentList));
+  if (idx >= 0) state.lists[idx] = listSnapshot;
+  else state.lists.push(listSnapshot);
 
-  // Lista salva com sucesso: descarta o rascunho pendente
+  saveLocalCache();
   clearDraftStorage();
   openShoppingMode(state.currentList);
+
+  // Sincroniza em segundo plano sem travar a interface
+  apiCall(action, { list: listSnapshot }, { silent: true });
 }
 
 // =======================
@@ -840,31 +998,156 @@ function toggleShoppingItem(id) {
   const it = state.currentList.items.find(i => i.id === id);
   if (it) {
     it.checked = !it.checked;
+    const idx = state.lists.findIndex(l => l.id === state.currentList.id);
+    if (idx >= 0) state.lists[idx] = state.currentList;
+    saveLocalCache();
     renderShoppingItems();
   }
 }
 
-async function exitShoppingMode() {
-  await apiCall("updateList", { list: state.currentList });
+function exitShoppingMode() {
+  const listSnapshot = JSON.parse(JSON.stringify(state.currentList));
+  const idx = state.lists.findIndex(l => l.id === listSnapshot.id);
+  if (idx >= 0) state.lists[idx] = listSnapshot;
+  saveLocalCache();
   renderHome();
+
+  apiCall("updateList", { list: listSnapshot }, { silent: true });
 }
 
-async function finishShopping() {
+function finishShopping() {
   if (!confirm("Deseja marcar esta lista como compra concluída?")) return;
   state.currentList.status = "concluida";
   state.currentList.completedAt = new Date().toISOString();
-  await apiCall("updateList", { list: state.currentList });
+
+  const listSnapshot = JSON.parse(JSON.stringify(state.currentList));
+  const idx = state.lists.findIndex(l => l.id === listSnapshot.id);
+  if (idx >= 0) state.lists[idx] = listSnapshot;
+  saveLocalCache();
   renderHome();
+
+  apiCall("updateList", { list: listSnapshot }, { silent: true });
 }
 
 // ========================================================
-// TELA 4: GERENCIAR CATEGORIAS
+// TELA 4: CONFIGURAÇÕES (PERFIL, SENHA E CATEGORIAS)
 // ========================================================
-async function openCategoriesView() {
-  await syncDataFromBackend();
+function openSettingsView(focusSection = null) {
+  editingCategoryId = null;
   switchView('viewCategories');
-  document.getElementById('pageTitle').innerText = "Configurar Categorias";
+  document.getElementById('pageTitle').innerText = "Configurações";
+
+  // Preenche dados do perfil
+  const emailEl = document.getElementById('settingsEmailDisplay');
+  const nameEl = document.getElementById('settingsNameInput');
+  if (emailEl) emailEl.value = (state.currentUser && state.currentUser.email) || "";
+  if (nameEl) nameEl.value = (state.currentUser && state.currentUser.name) || "";
+
+  // Limpa formulários e feedbacks de senha/perfil
+  const profFb = document.getElementById('profileFeedback');
+  if (profFb) profFb.classList.add('d-none');
+
+  const passForm = document.getElementById('changePasswordForm');
+  if (passForm) passForm.reset();
+  resetPasswordInputMask('settingsCurrentPassword');
+  resetPasswordInputMask('settingsNewPassword');
+  resetPasswordInputMask('settingsConfirmPassword');
+  const passFb = document.getElementById('passwordChangeFeedback');
+  if (passFb) passFb.classList.add('d-none');
+
   renderCategoriesList();
+
+  if (focusSection === 'categories') {
+    const sec = document.getElementById('settingsCategoriesSection');
+    if (sec) sec.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  }
+}
+
+function openCategoriesView() {
+  openSettingsView('categories');
+}
+
+function showInlineFeedback(elId, message, isSuccess) {
+  const el = document.getElementById(elId);
+  if (!el) return;
+  el.classList.remove('d-none', 'text-success', 'text-danger');
+  el.classList.add(isSuccess ? 'text-success' : 'text-danger');
+  el.innerHTML = `<i class="bi ${isSuccess ? 'bi-check-circle-fill' : 'bi-exclamation-circle-fill'} me-1"></i>${escapeHtml(message)}`;
+}
+
+async function handleUpdateProfile(e) {
+  e.preventDefault();
+  const nameInput = document.getElementById('settingsNameInput');
+  const newName = (nameInput ? nameInput.value : "").trim();
+  if (!newName) {
+    showInlineFeedback('profileFeedback', 'O nome de tela não pode ficar vazio.', false);
+    return;
+  }
+
+  // Atualiza localmente na hora (Optimistic UI)
+  if (state.currentUser) {
+    state.currentUser.name = newName;
+    localStorage.setItem(STORAGE_USER_KEY, JSON.stringify(state.currentUser));
+    updateUserBadge();
+  }
+  showInlineFeedback('profileFeedback', 'Nome atualizado com sucesso!', true);
+
+  const res = await apiCall("updateProfile", { name: newName }, { silent: true });
+  if (res && res.ok && res.user) {
+    setSession(res.token || state.token, res.user);
+  } else if (res && res.error) {
+    showInlineFeedback('profileFeedback', res.error, false);
+  }
+}
+
+function validateSettingsPasswordsLive() {
+  const newPass = document.getElementById('settingsNewPassword').value;
+  const confirmPass = document.getElementById('settingsConfirmPassword').value;
+  const fb = document.getElementById('passwordChangeFeedback');
+  if (!fb) return;
+
+  if (!confirmPass) {
+    fb.classList.add('d-none');
+    return;
+  }
+
+  if (newPass === confirmPass) {
+    showInlineFeedback('passwordChangeFeedback', 'A confirmação da nova senha confere.', true);
+  } else {
+    showInlineFeedback('passwordChangeFeedback', 'As senhas digitadas não coincidem.', false);
+  }
+}
+
+async function handleChangePassword(e) {
+  e.preventDefault();
+  const currentPassword = document.getElementById('settingsCurrentPassword').value;
+  const newPassword = document.getElementById('settingsNewPassword').value;
+  const confirmPassword = document.getElementById('settingsConfirmPassword').value;
+
+  if (newPassword.length < 4) {
+    showInlineFeedback('passwordChangeFeedback', 'A nova senha deve ter pelo menos 4 caracteres.', false);
+    return;
+  }
+  if (newPassword !== confirmPassword) {
+    showInlineFeedback('passwordChangeFeedback', 'A confirmação da nova senha não confere.', false);
+    return;
+  }
+
+  const btn = document.getElementById('changePasswordBtn');
+  if (btn) btn.disabled = true;
+
+  const res = await apiCall("changePassword", { currentPassword, newPassword });
+  if (btn) btn.disabled = false;
+
+  if (res && res.ok) {
+    document.getElementById('changePasswordForm').reset();
+    resetPasswordInputMask('settingsCurrentPassword');
+    resetPasswordInputMask('settingsNewPassword');
+    resetPasswordInputMask('settingsConfirmPassword');
+    showInlineFeedback('passwordChangeFeedback', res.message || 'Senha alterada com sucesso!', true);
+  } else {
+    showInlineFeedback('passwordChangeFeedback', (res && res.error) || 'Não foi possível alterar a senha.', false);
+  }
 }
 
 function renderCategoriesList() {
@@ -888,20 +1171,41 @@ function renderCategoriesList() {
   } else {
     customCategories.forEach(cat => {
       const item = document.createElement('div');
-      item.className = "d-flex justify-content-between align-items-center p-2 rounded mb-2 border";
+      item.className = "d-flex justify-content-between align-items-center p-2 rounded mb-2 border gap-2";
       item.style.backgroundColor = cat.color;
-      item.innerHTML = `
-        <div class="d-flex align-items-center gap-2">
-          <span class="fw-bold text-dark">${escapeHtml(cat.name)}</span>
-          <span class="badge bg-white text-secondary border" style="font-size: 0.7rem;">Pessoal</span>
-        </div>
-        <div class="d-flex gap-2 align-items-center">
-          <input type="color" class="form-control form-control-color form-control-sm" value="${escapeHtml(cat.color)}" onchange="updateCatColor('${escapeHtml(cat.id)}', this.value)" title="Mudar cor">
-          <button class="btn btn-sm btn-outline-danger" title="Excluir categoria" onclick="deleteCategory('${escapeHtml(cat.id)}')">
-            <i class="bi bi-trash3"></i>
-          </button>
-        </div>
-      `;
+
+      if (editingCategoryId === cat.id) {
+        item.innerHTML = `
+          <div class="d-flex align-items-center gap-2 flex-grow-1">
+            <input type="text" id="editCatName_${escapeHtml(cat.id)}" class="form-control form-control-sm" value="${escapeHtml(cat.name)}" onkeydown="if(event.key==='Enter'){event.preventDefault();saveEditedCategory('${escapeHtml(cat.id)}');}else if(event.key==='Escape'){cancelEditCategory();}">
+            <input type="color" id="editCatColor_${escapeHtml(cat.id)}" class="form-control form-control-color form-control-sm" value="${escapeHtml(cat.color)}" title="Mudar cor">
+          </div>
+          <div class="d-flex gap-1 align-items-center">
+            <button class="btn btn-sm btn-success" title="Salvar alterações" onclick="saveEditedCategory('${escapeHtml(cat.id)}')">
+              <i class="bi bi-check-lg"></i>
+            </button>
+            <button class="btn btn-sm btn-outline-secondary bg-white" title="Cancelar edição" onclick="cancelEditCategory()">
+              <i class="bi bi-x-lg"></i>
+            </button>
+          </div>
+        `;
+      } else {
+        item.innerHTML = `
+          <div class="d-flex align-items-center gap-2">
+            <span class="fw-bold text-dark">${escapeHtml(cat.name)}</span>
+            <span class="badge bg-white text-secondary border" style="font-size: 0.7rem;">Pessoal</span>
+          </div>
+          <div class="d-flex gap-1 align-items-center">
+            <input type="color" class="form-control form-control-color form-control-sm" value="${escapeHtml(cat.color)}" onchange="updateCatColor('${escapeHtml(cat.id)}', this.value)" title="Mudar cor">
+            <button class="btn btn-sm btn-outline-primary bg-white" title="Editar nome da categoria" onclick="startEditCategory('${escapeHtml(cat.id)}')">
+              <i class="bi bi-pencil"></i>
+            </button>
+            <button class="btn btn-sm btn-outline-danger bg-white" title="Excluir categoria" onclick="deleteCategory('${escapeHtml(cat.id)}')">
+              <i class="bi bi-trash3"></i>
+            </button>
+          </div>
+        `;
+      }
       container.appendChild(item);
     });
   }
@@ -926,7 +1230,64 @@ function renderCategoriesList() {
   });
 }
 
-async function createCategoryFromManager() {
+function startEditCategory(catId) {
+  editingCategoryId = catId;
+  renderCategoriesList();
+  const input = document.getElementById(`editCatName_${catId}`);
+  if (input) {
+    input.focus();
+    input.select();
+  }
+}
+
+function cancelEditCategory() {
+  editingCategoryId = null;
+  renderCategoriesList();
+}
+
+function saveEditedCategory(catId) {
+  const target = state.categories.find(c => c.id === catId && !isSystemCategory(c));
+  if (!target) return;
+
+  const nameInput = document.getElementById(`editCatName_${catId}`);
+  const colorInput = document.getElementById(`editCatColor_${catId}`);
+  const newName = (nameInput ? nameInput.value : "").trim();
+  const newColor = colorInput ? colorInput.value : target.color;
+
+  if (!newName) return alert("O nome da categoria não pode ficar vazio.");
+
+  const duplicate = state.categories.find(c => c.id !== catId && normalizeCategoryName(c.name) === normalizeCategoryName(newName));
+  if (duplicate) return alert("Já existe outra categoria com este nome.");
+
+  const oldName = target.name;
+  target.name = newName;
+  target.color = newColor;
+  editingCategoryId = null;
+
+  let renames = null;
+  if (oldName !== newName) {
+    renames = { [oldName]: newName };
+    // Atualiza referências locais nas listas e no catálogo
+    state.lists.forEach(list => {
+      (list.items || []).forEach(it => {
+        if (it.category === oldName) it.category = newName;
+      });
+    });
+    if (state.currentList && state.currentList.items) {
+      state.currentList.items.forEach(it => {
+        if (it.category === oldName) it.category = newName;
+      });
+    }
+    state.catalog.forEach(catItem => {
+      if (catItem.category === oldName) catItem.category = newName;
+    });
+  }
+
+  renderCategoriesList();
+  persistUserCategories(renames);
+}
+
+function createCategoryFromManager() {
   const inputEl = document.getElementById('manageCatName');
   const name = inputEl.value.trim();
   const color = document.getElementById('manageCatColor').value;
@@ -938,20 +1299,18 @@ async function createCategoryFromManager() {
   state.categories.push({ id: "cat_" + Date.now(), name, color, isSystem: false });
   inputEl.value = "";
   renderCategoriesList();
-  await persistUserCategories();
-  renderCategoriesList();
+  persistUserCategories();
 }
 
-async function updateCatColor(catId, color) {
+function updateCatColor(catId, color) {
   const target = state.categories.find(c => c.id === catId && !isSystemCategory(c));
   if (!target) return;
   target.color = color;
   renderCategoriesList();
-  await persistUserCategories();
-  renderCategoriesList();
+  persistUserCategories();
 }
 
-async function deleteCategory(catId) {
+function deleteCategory(catId) {
   const target = state.categories.find(c => c.id === catId);
   if (!target) return;
   if (isSystemCategory(target)) {
@@ -960,9 +1319,9 @@ async function deleteCategory(catId) {
   if (!confirm(`Deseja excluir a categoria personalizada "${target.name}"?`)) return;
 
   state.categories = state.categories.filter(c => c.id !== catId);
+  if (editingCategoryId === catId) editingCategoryId = null;
   renderCategoriesList();
-  await persistUserCategories();
-  renderCategoriesList();
+  persistUserCategories();
 }
 
 function goHome() {
