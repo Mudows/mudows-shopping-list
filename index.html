@@ -22,6 +22,17 @@
     body {
       background-color: #f8f9fa;
       min-height: 100vh;
+      padding-bottom: 4.5rem;
+    }
+    #appFooter {
+      position: fixed;
+      bottom: 0;
+      left: 0;
+      right: 0;
+      background: rgba(248, 249, 250, 0.94);
+      backdrop-filter: blur(4px);
+      z-index: 1030;
+      cursor: pointer;
     }
     #loadingOverlay {
       position: fixed;
@@ -184,6 +195,9 @@
         <div class="d-flex align-items-center gap-2">
           <button class="btn btn-outline-secondary btn-sm d-flex align-items-center gap-1" onclick="openSettingsView()" title="Configurações da Conta e Categorias">
             <i class="bi bi-gear-fill"></i> <span class="d-none d-sm-inline">Configurações</span>
+          </button>
+          <button class="btn btn-outline-secondary btn-sm d-flex align-items-center gap-1" onclick="openAboutModal()" title="Sobre o aplicativo">
+            <i class="bi bi-info-circle-fill"></i> <span class="d-none d-sm-inline">Sobre</span>
           </button>
           <button class="btn btn-outline-danger btn-sm d-flex align-items-center gap-1" onclick="logout()" title="Sair da conta">
             <i class="bi bi-box-arrow-right"></i> <span class="d-none d-sm-inline">Sair</span>
@@ -391,11 +405,54 @@
         <button class="btn btn-outline-secondary w-100" onclick="goHome()">Voltar para Listas</button>
       </section>
     </div>
+  </div>
 
-    <!-- Rodapé de Versão (visível em todas as telas, exceto durante o carregamento) -->
-    <footer id="appFooter" class="text-center text-muted small mt-4 pt-3 border-top">
-      <span class="fw-semibold">Usagi Compras</span> &bull; <span id="appVersionBadge" class="font-monospace">v0.4.0-alpha</span>
-    </footer>
+  <!-- Rodapé fixo na base do viewport (visível em todas as telas, exceto durante o carregamento) -->
+  <footer id="appFooter" class="text-center text-muted small py-2 border-top" onclick="openAboutModal()" title="Clique para ver informações sobre o aplicativo">
+    <span class="fw-semibold">Usagi Compras</span> &bull; <span id="appVersionBadge" class="font-monospace">v0.4.0-alpha</span> &bull; <span>&copy; 2026 Kaizer Usagi</span>
+  </footer>
+
+  <!-- Modal "Sobre" -->
+  <div class="modal fade" id="aboutModal" tabindex="-1" aria-labelledby="aboutModalLabel" aria-hidden="true">
+    <div class="modal-dialog modal-dialog-centered modal-sm">
+      <div class="modal-content border-0 shadow">
+        <div class="modal-header border-0 pb-0">
+          <h6 class="modal-title fw-bold text-secondary" id="aboutModalLabel">
+            <i class="bi bi-info-circle-fill text-primary me-1"></i>Sobre o Aplicativo
+          </h6>
+          <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Fechar"></button>
+        </div>
+        <div class="modal-body text-center pt-2 pb-4">
+          <div class="display-5 mb-2">🛒</div>
+          <h5 class="fw-bold mb-1" id="aboutAppName">Usagi Compras</h5>
+          <div class="mb-3">
+            <span class="badge bg-primary-subtle text-primary border border-primary-subtle font-monospace" id="aboutAppVersion">v0.4.0-alpha</span>
+            <span class="badge bg-warning-subtle text-warning-emphasis border border-warning-subtle">Alpha Release</span>
+          </div>
+          <p class="text-muted small mb-3 px-2">
+            Aplicativo PWA para planejamento e controle de compras mensais com arquitetura Local-First e sincronização em nuvem.
+          </p>
+          <div class="bg-light rounded p-2 small text-secondary mb-3 text-start">
+            <div class="d-flex justify-content-between py-1 border-bottom">
+              <span>Desenvolvedora:</span>
+              <strong class="text-dark">Kaizer Usagi</strong>
+            </div>
+            <div class="d-flex justify-content-between py-1 border-bottom">
+              <span>Licença:</span>
+              <strong class="text-dark">MIT</strong>
+            </div>
+            <div class="d-flex justify-content-between py-1">
+              <span>Modo Offline:</span>
+              <strong class="text-success"><i class="bi bi-check-circle-fill me-1"></i>Ativo (PWA)</strong>
+            </div>
+          </div>
+          <div class="small text-muted fw-semibold">
+            &copy; 2026 Kaizer Usagi.<br>
+            <span class="fw-normal" style="font-size: 0.75rem;">Todos os direitos reservados.</span>
+          </div>
+        </div>
+      </div>
+    </div>
   </div>
 
   <!-- Bootstrap 5 Bundle JS -->

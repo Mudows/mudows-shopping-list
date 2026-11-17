@@ -1,4 +1,4 @@
-const CACHE_NAME = 'usagi-compras-pwa-v0.4.0-alpha';
+const CACHE_NAME = 'usagi-compras-pwa-v0.4.1-alpha';
 const ASSETS_TO_CACHE = [
   './index.html',
   './app.js',

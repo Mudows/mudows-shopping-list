@@ -564,11 +564,23 @@ async function syncDataFromBackend(options = { silent: true }) {
 async function init() {
   const verEl = document.getElementById('appVersionBadge');
   if (verEl) verEl.innerText = APP_VERSION;
+  const aboutVerEl = document.getElementById('aboutAppVersion');
+  if (aboutVerEl) aboutVerEl.innerText = APP_VERSION;
+  const aboutNameEl = document.getElementById('aboutAppName');
+  if (aboutNameEl) aboutNameEl.innerText = APP_NAME;
+
   if (state.token && state.currentUser) {
     await enterApp();
   } else {
     switchView('viewAuth');
   }
+}
+
+function openAboutModal() {
+  const modalEl = document.getElementById('aboutModal');
+  if (!modalEl || typeof bootstrap === 'undefined') return;
+  const modal = bootstrap.Modal.getOrCreateInstance(modalEl);
+  modal.show();
 }
 
 function switchView(viewId) {
