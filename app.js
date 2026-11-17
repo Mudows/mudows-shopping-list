@@ -78,6 +78,30 @@ function getUserCacheKey() {
   return uid ? `compras_userdata_${uid}` : null;
 }
 
+function getUserDraftKey() {
+  const uid = state.currentUser && state.currentUser.id ? state.currentUser.id : null;
+  return uid ? `${STORAGE_DRAFT_KEY}_${uid}` : STORAGE_DRAFT_KEY;
+}
+
+function belongsToCurrentUser(list) {
+  if (!list || typeof list !== "object") return false;
+  const currentUid = state.currentUser && state.currentUser.id ? String(state.currentUser.id) : null;
+  if (!currentUid) return false;
+
+  // Se o objeto já possui userId explícito, exige correspondência exata
+  if (list.userId) {
+    return String(list.userId) === currentUid;
+  }
+
+  // Defesa extra: se o Apps Script antigo vazou o userId no campo name ou date, verifica se é deste usuário
+  const rawName = String(list.name || "").trim();
+  const rawDate = String(list.date || "").trim();
+  if (rawName.startsWith("user_") && rawName !== currentUid) return false;
+  if (rawDate.startsWith("user_") && rawDate !== currentUid) return false;
+
+  return true;
+}
+
 function saveLocalCache() {
   const key = getUserCacheKey();
   if (!key) return;
@@ -120,6 +144,7 @@ function sanitizeListObject(list, localFallback = null) {
 
   return {
     ...list,
+    userId: list.userId || (state.currentUser && state.currentUser.id) || "",
     date: cleanDate,
     name: cleanName || cleanDate,
     status: (list.status === "concluida" || list.status === "comprando") ? list.status : "comprando",
@@ -135,7 +160,9 @@ function loadLocalCache() {
     if (!raw) return false;
     const parsed = JSON.parse(raw);
     if (!parsed || typeof parsed !== "object") return false;
-    state.lists = Array.isArray(parsed.lists) ? parsed.lists.map(l => sanitizeListObject(l)) : [];
+    state.lists = Array.isArray(parsed.lists)
+      ? parsed.lists.filter(l => belongsToCurrentUser(l)).map(l => sanitizeListObject(l))
+      : [];
     state.catalog = Array.isArray(parsed.catalog) ? parsed.catalog : [];
     state.categories = normalizeCategories(parsed.categories);
     return true;
@@ -261,22 +288,22 @@ async function apiCall(action, payload = {}, options = {}) {
 // ==========================================
 function saveDraftToStorage() {
   if (state.currentList && (state.currentList.items.length > 0 || state.currentList.date)) {
-    localStorage.setItem(STORAGE_DRAFT_KEY, JSON.stringify(state.currentList));
+    localStorage.setItem(getUserDraftKey(), JSON.stringify(state.currentList));
   }
 }
 
 function clearDraftStorage() {
-  localStorage.removeItem(STORAGE_DRAFT_KEY);
+  localStorage.removeItem(getUserDraftKey());
   checkDraftAlert();
 }
 
 function checkDraftAlert() {
-  const draftStr = localStorage.getItem(STORAGE_DRAFT_KEY);
+  const draftStr = localStorage.getItem(getUserDraftKey());
   const alertEl = document.getElementById('draftAlert');
   if (draftStr && (!state.currentList || document.getElementById('viewHome').classList.contains('active'))) {
     try {
       const draft = JSON.parse(draftStr);
-      if (draft && draft.items && (draft.items.length > 0 || draft.date)) {
+      if (draft && belongsToCurrentUser(draft) && draft.items && (draft.items.length > 0 || draft.date)) {
         document.getElementById('draftAlertDesc').innerText = `Lista de ${draft.date || 'data não informada'} com ${draft.items.length} itens.`;
         alertEl.classList.remove('d-none');
         alertEl.classList.add('d-flex');
@@ -291,10 +318,10 @@ function checkDraftAlert() {
 }
 
 function resumeDraft() {
-  const draftStr = localStorage.getItem(STORAGE_DRAFT_KEY);
+  const draftStr = localStorage.getItem(getUserDraftKey());
   if (!draftStr) return;
   try {
-    state.currentList = JSON.parse(draftStr);
+    state.currentList = sanitizeListObject(JSON.parse(draftStr));
     openEditor();
   } catch(e) {}
 }
@@ -511,9 +538,9 @@ async function syncDataFromBackend(options = { silent: true }) {
       if (l && l.id) localMap[l.id] = l;
     });
 
-    state.lists = (data.lists || []).map(remoteList => {
-      return sanitizeListObject(remoteList, localMap[remoteList.id] || null);
-    });
+    state.lists = (data.lists || [])
+      .filter(remoteList => belongsToCurrentUser(remoteList))
+      .map(remoteList => sanitizeListObject(remoteList, localMap[remoteList.id] || null));
     state.catalog = (data.catalog || []).filter(c => c && !String(c.name || "").startsWith("user_"));
     state.categories = normalizeCategories(data.categories);
     saveLocalCache();
@@ -639,6 +666,7 @@ function startNewList() {
   const defaultDate = getTodayIsoDate();
   state.currentList = {
     id: "list_" + Date.now(),
+    userId: (state.currentUser && state.currentUser.id) || "",
     date: defaultDate,
     name: defaultDate,
     status: "comprando",
@@ -654,6 +682,7 @@ function cloneList(sourceId) {
   const today = getTodayIsoDate();
   state.currentList = {
     id: "list_" + Date.now(),
+    userId: (state.currentUser && state.currentUser.id) || "",
     date: today,
     name: today,
     status: "comprando",
