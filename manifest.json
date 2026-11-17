@@ -1,7 +1,7 @@
 {
-  "name": "Lista de Compras Mensal",
-  "short_name": "Compras",
-  "description": "Aplicativo de Lista de Compras Mensal",
+  "name": "Usagi Compras",
+  "short_name": "Usagi Compras",
+  "description": "Usagi Compras — Aplicativo de Lista de Compras",
   "start_url": "./index.html",
   "display": "standalone",
   "background_color": "#f8f9fa",

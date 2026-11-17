@@ -1,3 +1,7 @@
+// Metadados da Aplicação (SemVer)
+const APP_NAME = "Usagi Compras";
+const APP_VERSION = "v0.4.0-alpha";
+
 // URL do Google Apps Script
 const SCRIPT_URL = "https://script.google.com/macros/s/AKfycbzYkjZLw--OJpp_vS_f_c9KWVWdyAWyJJ9XFjsEHfAoLHD_OsgVmLphbxC6KvVqjR8OOA/exec";
 
@@ -227,12 +231,14 @@ function dismissInstallBanner() {
 async function apiCall(action, payload = {}, options = {}) {
   const isSilent = !!options.silent;
   const overlay = document.getElementById('loadingOverlay');
+  const footer = document.getElementById('appFooter');
 
   if (isSilent) {
     pendingSyncCount++;
     updateSyncBadge('syncing');
-  } else if (overlay) {
-    overlay.style.display = 'flex';
+  } else {
+    if (overlay) overlay.style.display = 'flex';
+    if (footer) footer.style.display = 'none';
   }
 
   try {
@@ -277,8 +283,9 @@ async function apiCall(action, payload = {}, options = {}) {
     }
     return null;
   } finally {
-    if (!isSilent && overlay) {
-      overlay.style.display = 'none';
+    if (!isSilent) {
+      if (overlay) overlay.style.display = 'none';
+      if (footer) footer.style.display = 'block';
     }
   }
 }
@@ -433,7 +440,7 @@ function toggleAuthMode() {
   state.authMode = state.authMode === "login" ? "register" : "login";
   const isReg = state.authMode === "register";
 
-  document.getElementById('authTitle').innerText = isReg ? "Criar Nova Conta" : "Acessar Lista de Compras";
+  document.getElementById('authTitle').innerText = isReg ? "Criar Nova Conta" : `Acessar ${APP_NAME}`;
   document.getElementById('authSubtitle').innerText = isReg ? "Crie sua conta para manter suas listas salvas com segurança." : "Entre com suas credenciais para visualizar e alterar os dados.";
   document.getElementById('authSubmitBtn').innerText = isReg ? "Cadastrar" : "Entrar";
   document.getElementById('nameFieldGroup').style.display = isReg ? "block" : "none";
@@ -555,6 +562,8 @@ async function syncDataFromBackend(options = { silent: true }) {
 }
 
 async function init() {
+  const verEl = document.getElementById('appVersionBadge');
+  if (verEl) verEl.innerText = APP_VERSION;
   if (state.token && state.currentUser) {
     await enterApp();
   } else {

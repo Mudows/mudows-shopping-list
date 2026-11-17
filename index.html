@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Lista de Compras Mensal</title>
+  <title>Usagi Compras</title>
   
   <!-- Configurações PWA -->
   <link rel="manifest" href="manifest.json">
@@ -11,7 +11,7 @@
   <meta name="mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
-  <meta name="apple-mobile-web-app-title" content="Compras">
+  <meta name="apple-mobile-web-app-title" content="Usagi Compras">
   <link rel="apple-touch-icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><rect width='100' height='100' rx='22' fill='%232563eb'/><text x='50%' y='67%' font-size='50' text-anchor='middle' fill='white'>🛒</text></svg>">
 
   <!-- Bootstrap 5 CSS -->
@@ -125,7 +125,7 @@
         <div class="card-body p-4 p-md-5">
           <div class="text-center mb-4">
             <div class="display-5 text-primary mb-2"><i class="bi bi-shield-lock-fill"></i></div>
-            <h2 class="fw-bold" id="authTitle">Acessar Lista de Compras</h2>
+            <h2 class="fw-bold" id="authTitle">Acessar Usagi Compras</h2>
             <p class="text-muted small" id="authSubtitle">Entre com suas credenciais para visualizar e alterar os dados.</p>
           </div>
 
@@ -391,6 +391,11 @@
         <button class="btn btn-outline-secondary w-100" onclick="goHome()">Voltar para Listas</button>
       </section>
     </div>
+
+    <!-- Rodapé de Versão (visível em todas as telas, exceto durante o carregamento) -->
+    <footer id="appFooter" class="text-center text-muted small mt-4 pt-3 border-top">
+      <span class="fw-semibold">Usagi Compras</span> &bull; <span id="appVersionBadge" class="font-monospace">v0.4.0-alpha</span>
+    </footer>
   </div>
 
   <!-- Bootstrap 5 Bundle JS -->
