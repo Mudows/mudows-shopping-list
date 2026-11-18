@@ -34,6 +34,11 @@
       z-index: 1030;
       cursor: pointer;
     }
+    @media (min-width: 769px) and (pointer: fine) {
+      #installBanner {
+        display: none !important;
+      }
+    }
     #loadingOverlay {
       position: fixed;
       inset: 0;
@@ -409,7 +414,7 @@
 
   <!-- Rodapé fixo na base do viewport (visível em todas as telas, exceto durante o carregamento) -->
   <footer id="appFooter" class="text-center text-muted small py-2 border-top" onclick="openAboutModal()" title="Clique para ver informações sobre o aplicativo">
-    <span class="fw-semibold">Usagi Compras</span> &bull; <span id="appVersionBadge" class="font-monospace">v0.4.0-alpha</span> &bull; <span>&copy; 2026 Kaizer Usagi</span>
+    <span class="fw-semibold">Usagi Compras</span> &bull; <span id="appVersionBadge" class="font-monospace">v0.4.1-alpha</span> &bull; <span>&copy; 2026 Kaizer Usagi</span>
   </footer>
 
   <!-- Modal "Sobre" -->
@@ -426,7 +431,7 @@
           <div class="display-5 mb-2">🛒</div>
           <h5 class="fw-bold mb-1" id="aboutAppName">Usagi Compras</h5>
           <div class="mb-3">
-            <span class="badge bg-primary-subtle text-primary border border-primary-subtle font-monospace" id="aboutAppVersion">v0.4.0-alpha</span>
+            <span class="badge bg-primary-subtle text-primary border border-primary-subtle font-monospace" id="aboutAppVersion">v0.4.1-alpha</span>
             <span class="badge bg-warning-subtle text-warning-emphasis border border-warning-subtle">Alpha Release</span>
           </div>
           <p class="text-muted small mb-3 px-2">

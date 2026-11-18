@@ -1,6 +1,6 @@
 // Metadados da Aplicação (SemVer)
 const APP_NAME = "Usagi Compras";
-const APP_VERSION = "v0.4.0-alpha";
+const APP_VERSION = "v0.4.1-alpha";
 
 // URL do Google Apps Script
 const SCRIPT_URL = "https://script.google.com/macros/s/AKfycbzYkjZLw--OJpp_vS_f_c9KWVWdyAWyJJ9XFjsEHfAoLHD_OsgVmLphbxC6KvVqjR8OOA/exec";
@@ -198,9 +198,24 @@ if ('serviceWorker' in navigator) {
   });
 }
 
-// Banner PWA
+function isMobileDevice() {
+  if (window.matchMedia && window.matchMedia('(display-mode: standalone)').matches) {
+    return false;
+  }
+  if (navigator.userAgentData && typeof navigator.userAgentData.mobile === "boolean") {
+    return navigator.userAgentData.mobile;
+  }
+  const uaMobile = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent || "");
+  const coarseSmallScreen = window.matchMedia
+    ? window.matchMedia("(max-width: 768px) and (pointer: coarse)").matches
+    : false;
+  return uaMobile || coarseSmallScreen;
+}
+
+// Banner PWA (exibido exclusivamente em dispositivos móveis)
 window.addEventListener('beforeinstallprompt', (e) => {
   e.preventDefault();
+  if (!isMobileDevice()) return;
   deferredPrompt = e;
   const banner = document.getElementById('installBanner');
   if (banner) {
